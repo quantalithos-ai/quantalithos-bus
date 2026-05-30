@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{AuditRef, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef};
+use crate::metadata::{
+    AuditRef, DeliveryId, DeliveryStatus, FeedbackId, FeedbackRecordStatus,
+    PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
+};
 
 /// The result returned after publication acceptance is decided.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -81,6 +84,40 @@ impl OutboxRelayResult {
         Self {
             publication_id,
             relay_status: OutboxRelayStatus::Duplicate,
+            audit_ref,
+        }
+    }
+}
+
+/// The result returned after one delivery feedback is committed.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeedbackRecordResult {
+    /// The committed feedback identifier.
+    pub feedback_id: FeedbackId,
+    /// The associated delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The stable feedback receipt status.
+    pub feedback_status: FeedbackRecordStatus,
+    /// The resulting committed delivery lifecycle state.
+    pub delivery_status: DeliveryStatus,
+    /// The audit entry that records the committed feedback.
+    pub audit_ref: AuditRef,
+}
+
+impl FeedbackRecordResult {
+    /// Creates a result for a committed feedback record.
+    pub fn recorded(
+        feedback_id: FeedbackId,
+        delivery_id: DeliveryId,
+        delivery_status: DeliveryStatus,
+        audit_ref: AuditRef,
+    ) -> Self {
+        Self {
+            feedback_id,
+            delivery_id,
+            feedback_status: FeedbackRecordStatus::Recorded,
+            delivery_status,
             audit_ref,
         }
     }

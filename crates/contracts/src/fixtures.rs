@@ -1,6 +1,6 @@
 //! Reusable fixture builders for contract and domain tests.
 
-use crate::commands::AcceptPublicationCommand;
+use crate::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
 use crate::events::{CommittedOutboxFact, CommittedOutboxFactInput, CommittedOutboxFactPage};
 use crate::jobs::{
     DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
@@ -10,12 +10,13 @@ use crate::metadata::{
     BackendProfileRef, CapabilityVersion, CommandMetadata, CommittedOutboxFactRef,
     ConsistencyMarker, ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef, DeliveryAttemptId,
     DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId, EventMetadata,
-    EventSourceRef, FeedbackId, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor,
-    PayloadDigest, PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata,
-    RequestOrigin, SourceRecordRef, SourceSystem, TargetScope, Timestamp, TraceId,
+    EventSourceRef, ExternalFeedbackRef, FeedbackId, FeedbackKind, FeedbackReason,
+    FeedbackRecordStatus, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor, PayloadDigest,
+    PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata, RequestOrigin,
+    SourceRecordRef, SourceSystem, TargetScope, Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
-use crate::receipts::{OutboxRelayResult, OutboxRelayStatus};
+use crate::receipts::{FeedbackRecordResult, OutboxRelayResult, OutboxRelayStatus};
 use crate::views::DeliveryStatusView;
 
 /// The shared baseline data for a deterministic test run.
@@ -358,6 +359,66 @@ impl DeliveryFixtureBuilder {
     }
 }
 
+/// Builds deterministic feedback command and receipt fixtures for a run.
+#[derive(Clone, Debug)]
+pub struct FeedbackFixtureBuilder {
+    run: TestRun,
+}
+
+impl FeedbackFixtureBuilder {
+    /// Creates a new feedback fixture builder.
+    pub fn new(run: TestRun) -> Self {
+        Self { run }
+    }
+
+    /// Returns a valid feedback-recording command for the provided delivery attempt.
+    pub fn ack_command(
+        &self,
+        delivery_id: DeliveryId,
+        attempt_id: DeliveryAttemptId,
+    ) -> RecordDeliveryFeedbackCommand {
+        RecordDeliveryFeedbackCommand {
+            delivery_id,
+            attempt_id,
+            feedback_kind: FeedbackKind::Ack,
+            feedback_reason: FeedbackReason::new("subscriber_processed"),
+            observed_at: Timestamp::new("2026-05-30T00:00:10Z"),
+            external_feedback_ref: ExternalFeedbackRef::new(format!(
+                "external_feedback_{}",
+                self.run.run_id
+            )),
+        }
+    }
+
+    /// Returns a fail feedback command for the provided delivery attempt.
+    pub fn fail_command(
+        &self,
+        delivery_id: DeliveryId,
+        attempt_id: DeliveryAttemptId,
+    ) -> RecordDeliveryFeedbackCommand {
+        RecordDeliveryFeedbackCommand {
+            feedback_kind: FeedbackKind::Fail,
+            feedback_reason: FeedbackReason::new("subscriber_failed"),
+            ..self.ack_command(delivery_id, attempt_id)
+        }
+    }
+
+    /// Returns a valid feedback-recording receipt DTO.
+    pub fn feedback_record_result(
+        &self,
+        delivery_id: DeliveryId,
+        delivery_status: DeliveryStatus,
+    ) -> FeedbackRecordResult {
+        FeedbackRecordResult {
+            feedback_id: FeedbackId::new(format!("feedback_{}", self.run.run_id)),
+            delivery_id,
+            feedback_status: FeedbackRecordStatus::Recorded,
+            delivery_status,
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
@@ -367,7 +428,7 @@ mod tests {
     use crate::metadata::{
         AuditRef, DeliveryStatus, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
     };
-    use crate::receipts::PublicationAcceptanceResult;
+    use crate::receipts::{FeedbackRecordResult, PublicationAcceptanceResult};
 
     fn roundtrip<T>(value: &T)
     where
@@ -419,6 +480,30 @@ mod tests {
         let builder = DeliveryFixtureBuilder::new(run);
 
         roundtrip(&builder.delivery_progression_result());
+    }
+
+    #[test]
+    fn record_delivery_feedback_command_roundtrip() {
+        let run = TestRunBuilder::new("fdb-001").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = FeedbackFixtureBuilder::new(run);
+        let command = builder.ack_command(
+            delivery_builder.delivery_id(),
+            DeliveryAttemptId::new("attempt_fdb_001"),
+        );
+
+        roundtrip(&command);
+    }
+
+    #[test]
+    fn feedback_record_result_roundtrip() {
+        roundtrip(&FeedbackRecordResult {
+            feedback_id: FeedbackId::new("feedback-001"),
+            delivery_id: DeliveryId::new("delivery-001"),
+            feedback_status: FeedbackRecordStatus::Recorded,
+            delivery_status: DeliveryStatus::Completed,
+            audit_ref: AuditRef::new("audit-002"),
+        });
     }
 
     #[test]

@@ -1,0 +1,28 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_api-214bfa9e5e73692c)
+
+running 9 tests
+test tests::accept_publication_commits_truth_audit_and_idempotency_anchor ... ok
+test tests::accept_publication_boundary_violation_returns_422_and_commits_rejection ... ok
+test tests::accept_publication_rolls_back_staged_truth_when_audit_append_fails ... ok
+test tests::accept_publication_missing_core_event_ref_returns_validation_with_rejected_truth ... ok
+test tests::accept_publication_same_key_same_digest_returns_existing_result ... ok
+test tests::accept_publication_same_key_different_digest_returns_conflict ... ok
+test tests::record_feedback_returns_completed_result_and_commits_truth ... ok
+test tests::record_feedback_same_key_same_digest_returns_existing_result ... ok
+test tests::record_feedback_late_or_unknown_feedback_returns_not_found_or_conflict ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bus_api.rs (target/debug/deps/bus_api-652000814a84967f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

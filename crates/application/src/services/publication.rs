@@ -172,6 +172,9 @@ where
     ) -> Result<PublicationAcceptanceResult, ApplicationError> {
         let publication_id = match &anchor.bound_record_ref {
             RecordRef::Publication(publication_id) => publication_id,
+            RecordRef::Feedback(_) => {
+                return Err(ApplicationError::from(RepositoryError::CorruptedRecord));
+            }
         };
 
         let acceptance = self

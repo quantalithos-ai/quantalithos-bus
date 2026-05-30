@@ -13,13 +13,14 @@ pub use errors::{
 };
 pub use ports::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, BusRecordKind,
-    ClockPort, CommitReceipt, DeliveryRepository, IdGeneratorPort, IdempotencyRepository,
-    OutboxFactSourcePort, PublicationRepository, RollbackReason, TransportBackendPort, UnitOfWork,
-    UnitOfWorkHandle, UnitOfWorkPurpose,
+    ClockPort, CommitReceipt, DeliveryRepository, FeedbackRepository, IdGeneratorPort,
+    IdempotencyRepository, OutboxFactSourcePort, PublicationRepository, RollbackReason,
+    TransportBackendPort, UnitOfWork, UnitOfWorkHandle, UnitOfWorkPurpose,
 };
 pub use services::{
-    DeliveryProgressionItemResult, DeliveryProgressionService, DeliveryProgressionServiceDeps,
-    DeliveryProgressionUseCase, OutboxPublicationAcceptanceUseCase, OutboxRelayService,
+    DeliveryFeedbackUseCase, DeliveryProgressionItemResult, DeliveryProgressionService,
+    DeliveryProgressionServiceDeps, DeliveryProgressionUseCase, FeedbackRecordingService,
+    FeedbackRecordingServiceDeps, OutboxPublicationAcceptanceUseCase, OutboxRelayService,
     OutboxRelayServiceDeps, OutboxRelayUseCase, PublicationAcceptanceService,
     PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
 };

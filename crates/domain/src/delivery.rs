@@ -8,6 +8,7 @@ use bus_contracts::metadata::{
 };
 
 use crate::errors::DomainError;
+use crate::feedback::FeedbackResult;
 use crate::publication::TransportSemantic;
 
 /// The bus-owned truth record for a subscriber delivery.
@@ -202,6 +203,12 @@ impl DeliveryRecord {
         if reason.as_str().trim().is_empty() {
             return Err(DomainError::InvalidDeliveryRecord("failure_reason"));
         }
+        if matches!(
+            self.status,
+            DeliveryStatus::Completed | DeliveryStatus::DeadLettered
+        ) {
+            return Err(DomainError::TerminalDeliveryStateReopenRejected);
+        }
         if !self.can_transition_to(DeliveryStatus::Failed) {
             return Err(DomainError::InvalidDeliveryTransition {
                 from: self.status,
@@ -210,6 +217,52 @@ impl DeliveryRecord {
         }
 
         self.status = DeliveryStatus::Failed;
+        Ok(())
+    }
+
+    /// Marks the delivery as completed using a committed ack feedback result.
+    pub fn mark_completed(
+        &mut self,
+        feedback: FeedbackResult,
+        _actor: ActorContext,
+    ) -> Result<(), DomainError> {
+        if feedback.delivery_id != self.delivery_id {
+            return Err(DomainError::InvalidFeedbackResult("feedback.delivery_id"));
+        }
+        if !feedback.is_success() {
+            return Err(DomainError::InvalidFeedbackResult("feedback.status"));
+        }
+        match self.status {
+            DeliveryStatus::Delivered => {}
+            DeliveryStatus::Completed | DeliveryStatus::DeadLettered => {
+                return Err(DomainError::TerminalDeliveryStateReopenRejected);
+            }
+            current => {
+                return Err(DomainError::InvalidDeliveryTransition {
+                    from: current,
+                    to: DeliveryStatus::Completed,
+                });
+            }
+        }
+
+        let attempt_ref = DeliveryAttemptRef::new(feedback.source.attempt_id.as_str());
+        if self.last_attempt_ref != Some(attempt_ref.clone()) {
+            return Err(DomainError::AttemptRefMismatch);
+        }
+
+        let attempt = self
+            .attempts
+            .iter()
+            .find(|candidate| candidate.attempt_id == feedback.source.attempt_id)
+            .ok_or(DomainError::AttemptRefMismatch)?;
+        if !attempt.is_finished() {
+            return Err(DomainError::AttemptNotFinished);
+        }
+        if attempt.result_status != Some(BackendDeliveryStatus::Delivered) {
+            return Err(DomainError::AttemptOutcomeDoesNotDeliver);
+        }
+
+        self.status = DeliveryStatus::Completed;
         Ok(())
     }
 
@@ -398,6 +451,7 @@ mod tests {
     use bus_contracts::metadata::{ActorContext, HistoryReason, SubscriberScope};
 
     use super::*;
+    use crate::feedback::{FeedbackResult, FeedbackSource};
     use crate::publication::{PublicationMaterial, TransportSemantic};
 
     fn scheduled_record() -> (DeliveryRecord, ActorContext, BackendCapabilityRef) {
@@ -481,6 +535,73 @@ mod tests {
             .expect("dispatching delivery may fail");
 
         assert_eq!(record.status, DeliveryStatus::Failed);
+    }
+
+    #[test]
+    fn delivery_record_marks_completed_from_ack_feedback() {
+        let (mut record, actor, capability_ref) = scheduled_record();
+        let mut attempt = record
+            .start_attempt(capability_ref, Timestamp::new("2026-05-30T00:00:01Z"))
+            .expect("scheduled delivery should start");
+        attempt
+            .finish(
+                BackendDeliveryResult::delivered(Some("backend_delivery_003".into())),
+                Timestamp::new("2026-05-30T00:00:02Z"),
+            )
+            .expect("attempt should finish");
+        record
+            .mark_delivered(attempt.clone(), actor.clone())
+            .expect("dispatching delivery should become delivered");
+        let feedback = FeedbackResult::ack(
+            record.delivery_id.clone(),
+            FeedbackSource::new(attempt.attempt_id.clone(), "external_feedback_003".into())
+                .expect("feedback source should be valid"),
+            Some("subscriber_processed".into()),
+            actor.clone(),
+            Timestamp::new("2026-05-30T00:00:03Z"),
+        )
+        .expect("ack feedback should be valid");
+
+        record
+            .mark_completed(feedback, actor)
+            .expect("delivered delivery should complete");
+
+        assert_eq!(record.status, DeliveryStatus::Completed);
+    }
+
+    #[test]
+    fn delivery_record_rejects_completion_from_old_attempt_feedback() {
+        let (mut record, actor, capability_ref) = scheduled_record();
+        let mut attempt = record
+            .start_attempt(capability_ref, Timestamp::new("2026-05-30T00:00:01Z"))
+            .expect("scheduled delivery should start");
+        attempt
+            .finish(
+                BackendDeliveryResult::delivered(Some("backend_delivery_004".into())),
+                Timestamp::new("2026-05-30T00:00:02Z"),
+            )
+            .expect("attempt should finish");
+        record
+            .mark_delivered(attempt, actor.clone())
+            .expect("dispatching delivery should become delivered");
+        let feedback = FeedbackResult::ack(
+            record.delivery_id.clone(),
+            FeedbackSource::new(
+                "attempt_feedback_old".into(),
+                "external_feedback_004".into(),
+            )
+            .expect("feedback source should be valid"),
+            Some("subscriber_processed".into()),
+            actor.clone(),
+            Timestamp::new("2026-05-30T00:00:03Z"),
+        )
+        .expect("ack feedback should be valid");
+
+        let error = record
+            .mark_completed(feedback, actor)
+            .expect_err("feedback for an old attempt must conflict");
+
+        assert_eq!(error, DomainError::AttemptRefMismatch);
     }
 
     #[test]

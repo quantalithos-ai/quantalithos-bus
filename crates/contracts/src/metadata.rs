@@ -130,8 +130,13 @@ string_newtype!(
 );
 string_newtype!(EventId, "A stable inbound event identifier.");
 string_newtype!(EventSourceRef, "A stable inbound event source reference.");
+string_newtype!(
+    ExternalFeedbackRef,
+    "A stable external feedback source reference."
+);
 string_newtype!(FailureReason, "A stable delivery failure reason.");
 string_newtype!(FeedbackId, "A stable feedback identifier.");
+string_newtype!(FeedbackReason, "A stable bus feedback reason.");
 string_newtype!(
     ForbiddenBodyPolicyRef,
     "A reference to the payload body boundary policy."
@@ -213,6 +218,16 @@ impl HistoryReason {
     pub fn delivery_failed() -> Self {
         Self::new("delivery_failed")
     }
+
+    /// Returns the stable reason for a feedback ack transition.
+    pub fn feedback_ack() -> Self {
+        Self::new("feedback_ack")
+    }
+
+    /// Returns the stable reason for a feedback fail transition.
+    pub fn feedback_fail() -> Self {
+        Self::new("feedback_fail")
+    }
 }
 
 impl FailureReason {
@@ -290,6 +305,38 @@ pub enum DeliveryStatus {
     DeadLettered,
     /// The delivery was completed by an acknowledged feedback result.
     Completed,
+}
+
+/// The feedback kind accepted by the command API.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackKind {
+    /// The subscriber or adapter acknowledged successful processing.
+    Ack,
+    /// The subscriber or adapter reported a failure outcome.
+    Fail,
+}
+
+/// The normalized bus feedback result state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackStatus {
+    /// The delivery was acknowledged successfully.
+    Ack,
+    /// The delivery was reported as failed.
+    Fail,
+    /// The delivery timed out before completion.
+    Timeout,
+    /// The feedback was recognized as a duplicate.
+    Duplicate,
+}
+
+/// The stable feedback receipt state returned by the command API.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackRecordStatus {
+    /// The feedback result is committed and visible.
+    Recorded,
 }
 
 /// The supported transport backend kind.

@@ -346,6 +346,10 @@ impl From<DomainError> for ApplicationError {
                 "validation.delivery_attempt",
                 format!("invalid delivery attempt field: {field}"),
             ),
+            DomainError::InvalidFeedbackResult(field) => Self::validation(
+                "validation.feedback_result",
+                format!("invalid feedback result field: {field}"),
+            ),
             DomainError::InvalidRequestDigest => Self::internal(
                 "internal.request_digest",
                 "request digest could not be computed",

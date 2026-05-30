@@ -1,8 +1,10 @@
 //! Idempotency and request-digest domain objects.
 
-use bus_contracts::commands::AcceptPublicationCommand;
+use bus_contracts::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
 use bus_contracts::events::CommittedOutboxFactInput;
-use bus_contracts::metadata::{IdempotencyKey, PublicationId, Timestamp, TraceContextRef};
+use bus_contracts::metadata::{
+    FeedbackId, IdempotencyKey, PublicationId, Timestamp, TraceContextRef,
+};
 
 use crate::errors::DomainError;
 
@@ -20,6 +22,8 @@ pub enum IdempotencyEntryKind {
 pub enum IdempotencyAction {
     /// The publication acceptance command.
     AcceptPublication,
+    /// The delivery feedback command.
+    RecordDeliveryFeedback,
     /// The committed outbox fact consumer.
     ConsumeCommittedOutboxFact,
 }
@@ -45,6 +49,15 @@ impl IdempotencyScope {
                 "{}::{}",
                 command.target_scope.project_id, command.target_scope.topic
             )),
+        }
+    }
+
+    /// Builds the command scope for `RecordDeliveryFeedback`.
+    pub fn for_record_delivery_feedback(command: &RecordDeliveryFeedbackCommand) -> Self {
+        Self {
+            entry_kind: IdempotencyEntryKind::Command,
+            action: IdempotencyAction::RecordDeliveryFeedback,
+            boundary_ref: Some(command.delivery_id.as_str().to_owned()),
         }
     }
 
@@ -84,31 +97,34 @@ impl RequestDigest {
         command: &AcceptPublicationCommand,
     ) -> Result<Self, DomainError> {
         let payload = serde_json::to_vec(command).map_err(|_| DomainError::InvalidRequestDigest)?;
-        let mut hash = 0xcbf29ce484222325_u64;
-        for byte in payload {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
+        Ok(Self::from_canonical_payload(payload))
+    }
 
-        Ok(Self {
-            value: format!("{hash:016x}"),
-            algorithm_version: DigestAlgorithmVersion::Fnv1a64V1,
-        })
+    /// Computes the request digest for `RecordDeliveryFeedback`.
+    pub fn from_record_delivery_feedback_command(
+        command: &RecordDeliveryFeedbackCommand,
+    ) -> Result<Self, DomainError> {
+        let payload = serde_json::to_vec(command).map_err(|_| DomainError::InvalidRequestDigest)?;
+        Ok(Self::from_canonical_payload(payload))
     }
 
     /// Computes the request digest for `ConsumeCommittedOutboxFact`.
     pub fn from_outbox_fact_input(input: &CommittedOutboxFactInput) -> Result<Self, DomainError> {
         let payload = serde_json::to_vec(input).map_err(|_| DomainError::InvalidRequestDigest)?;
+        Ok(Self::from_canonical_payload(payload))
+    }
+
+    fn from_canonical_payload(payload: Vec<u8>) -> Self {
         let mut hash = 0xcbf29ce484222325_u64;
         for byte in payload {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x100000001b3);
         }
 
-        Ok(Self {
+        Self {
             value: format!("{hash:016x}"),
             algorithm_version: DigestAlgorithmVersion::Fnv1a64V1,
-        })
+        }
     }
 }
 
@@ -117,6 +133,8 @@ impl RequestDigest {
 pub enum RecordRef {
     /// A publication acceptance result reference.
     Publication(PublicationId),
+    /// A feedback result reference.
+    Feedback(FeedbackId),
 }
 
 /// A committed idempotency anchor.
@@ -191,7 +209,8 @@ pub struct IdempotencyConflict {
 #[cfg(test)]
 mod tests {
     use bus_contracts::fixtures::{
-        OutboxFixtureBuilder, PublicationFixtureBuilder, TestRunBuilder,
+        DeliveryFixtureBuilder, FeedbackFixtureBuilder, OutboxFixtureBuilder,
+        PublicationFixtureBuilder, TestRunBuilder,
     };
 
     use super::*;
@@ -236,5 +255,30 @@ mod tests {
             RequestDigest::from_accept_publication_command(&command_builder.valid_material())
                 .expect("command digest should be computed");
         assert_ne!(first_digest, command_digest);
+    }
+
+    #[test]
+    fn feedback_command_scope_and_digest_follow_delivery_identity() {
+        let run = TestRunBuilder::new("idem-003").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let feedback_builder = FeedbackFixtureBuilder::new(run);
+        let command =
+            feedback_builder.ack_command(delivery_builder.delivery_id(), "attempt_idem_003".into());
+
+        let scope = IdempotencyScope::for_record_delivery_feedback(&command);
+        let first_digest = RequestDigest::from_record_delivery_feedback_command(&command)
+            .expect("feedback digest should be computed");
+        let mut second = command.clone();
+        second.external_feedback_ref = "external_feedback_changed".into();
+        let second_digest = RequestDigest::from_record_delivery_feedback_command(&second)
+            .expect("feedback digest should be computed");
+
+        assert_eq!(scope.entry_kind, IdempotencyEntryKind::Command);
+        assert_eq!(scope.action, IdempotencyAction::RecordDeliveryFeedback);
+        assert_eq!(
+            scope.boundary_ref,
+            Some(command.delivery_id.as_str().to_owned())
+        );
+        assert_ne!(first_digest, second_digest);
     }
 }

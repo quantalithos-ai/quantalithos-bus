@@ -13,6 +13,8 @@ pub enum UnitOfWorkPurpose {
     ConsumeCommittedOutboxFact,
     /// The delivery progression write path.
     RunDeliveryProgression,
+    /// The delivery feedback write path.
+    RecordDeliveryFeedback,
 }
 
 /// A rollback reason label.

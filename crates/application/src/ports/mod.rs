@@ -3,6 +3,7 @@
 mod audit;
 mod clock;
 mod delivery;
+mod feedback;
 mod id_generator;
 mod idempotency;
 mod outbox_source;
@@ -13,6 +14,7 @@ mod unit_of_work;
 pub use audit::AuditTrailRepository;
 pub use clock::ClockPort;
 pub use delivery::DeliveryRepository;
+pub use feedback::FeedbackRepository;
 pub use id_generator::{BusRecordKind, IdGeneratorPort};
 pub use idempotency::IdempotencyRepository;
 pub use outbox_source::OutboxFactSourcePort;

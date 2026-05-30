@@ -1,0 +1,27 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_application-76667766a0b6fcb2)
+
+running 4 tests
+test services::delivery::tests::progress_one_returns_manual_action_on_commit_uncertain ... ok
+test services::delivery::tests::progress_batch_marks_backend_unavailable_delivery_failed ... ok
+test services::delivery::tests::progress_batch_marks_capability_mismatch_failed_without_secret_leak ... ok
+test services::delivery::tests::progress_batch_delivers_scheduled_delivery_and_records_history ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/feedback.rs (target/debug/deps/feedback-07df37d5d1a5f321)
+
+running 4 tests
+test record_feedback_rejects_unknown_delivery_without_orphan_feedback ... ok
+test record_ack_feedback_commits_truth_history_and_idempotency_anchor ... ok
+test record_feedback_same_key_same_digest_returns_existing_result ... ok
+test record_feedback_same_key_different_digest_returns_conflict ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_application
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -3,8 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{
-    CoreEventRef, DeliveryMode, PayloadDigest, PayloadKind, PayloadRef, SourceRecordRef,
-    SourceSystem, TargetScope,
+    CoreEventRef, DeliveryAttemptId, DeliveryId, DeliveryMode, ExternalFeedbackRef, FeedbackKind,
+    FeedbackReason, PayloadDigest, PayloadKind, PayloadRef, SourceRecordRef, SourceSystem,
+    TargetScope, Timestamp,
 };
 
 /// Accepts publication material references into the bus.
@@ -27,4 +28,22 @@ pub struct AcceptPublicationCommand {
     pub delivery_mode: DeliveryMode,
     /// The logical target scope requested by the caller.
     pub target_scope: TargetScope,
+}
+
+/// Records normalized feedback for one committed delivery attempt.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordDeliveryFeedbackCommand {
+    /// The target delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The delivered attempt that produced the feedback.
+    pub attempt_id: DeliveryAttemptId,
+    /// The normalized feedback kind.
+    pub feedback_kind: FeedbackKind,
+    /// The stable feedback reason supplied by the caller.
+    pub feedback_reason: FeedbackReason,
+    /// The externally observed timestamp for the feedback.
+    pub observed_at: Timestamp,
+    /// The stable upstream feedback reference.
+    pub external_feedback_ref: ExternalFeedbackRef,
 }

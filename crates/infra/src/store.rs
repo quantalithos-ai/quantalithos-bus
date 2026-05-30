@@ -6,9 +6,12 @@ use std::sync::{Arc, Mutex};
 use bus_application::{
     CommitReceipt, RepositoryError, UnitOfWorkError, UnitOfWorkHandle, UnitOfWorkPurpose,
 };
-use bus_contracts::metadata::{DeliveryId, IdempotencyKey, PublicationId, Version};
+use bus_contracts::metadata::{
+    DeliveryId, ExternalFeedbackRef, FeedbackId, IdempotencyKey, PublicationId, Version,
+};
 use bus_domain::audit::BusAuditEntry;
 use bus_domain::delivery::DeliveryRecord;
+use bus_domain::feedback::FeedbackResult;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
 use bus_domain::publication::PublicationAcceptance;
 
@@ -23,6 +26,9 @@ struct MemoryStoreInner {
     next_audit_sequence: u64,
     deliveries: BTreeMap<DeliveryId, DeliveryRecord>,
     delivery_versions: BTreeMap<DeliveryId, Version>,
+    feedbacks: BTreeMap<FeedbackId, FeedbackResult>,
+    feedback_versions: BTreeMap<FeedbackId, Version>,
+    feedback_sources: HashMap<(DeliveryId, ExternalFeedbackRef), FeedbackId>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
     publication_versions: BTreeMap<PublicationId, Version>,
     anchors: HashMap<(IdempotencyScope, IdempotencyKey), IdempotencyAnchor>,
@@ -35,6 +41,8 @@ struct MemoryStoreInner {
 struct StagedTransaction {
     _purpose: Option<UnitOfWorkPurpose>,
     deliveries: BTreeMap<DeliveryId, DeliveryRecord>,
+    feedbacks: BTreeMap<FeedbackId, FeedbackResult>,
+    feedback_sources: HashMap<(DeliveryId, ExternalFeedbackRef), FeedbackId>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
     anchors: HashMap<(IdempotencyScope, IdempotencyKey), IdempotencyAnchor>,
     conflicts: Vec<IdempotencyConflict>,
@@ -87,6 +95,17 @@ impl SharedMemoryStore {
             inner
                 .delivery_versions
                 .insert(delivery_id, delivery.version());
+        }
+        for (feedback_id, feedback) in staged.feedbacks {
+            inner
+                .feedbacks
+                .insert(feedback_id.clone(), feedback.clone());
+            inner
+                .feedback_versions
+                .insert(feedback_id, feedback.version());
+        }
+        for (key, feedback_id) in staged.feedback_sources {
+            inner.feedback_sources.insert(key, feedback_id);
         }
         for (publication_id, acceptance) in staged.publications {
             let version = inner
@@ -249,6 +268,71 @@ impl SharedMemoryStore {
             .expect("memory store lock poisoned")
             .audits
             .clone()
+    }
+
+    /// Stages a new feedback result insert.
+    pub fn stage_feedback(
+        &self,
+        transaction_id: u64,
+        feedback: FeedbackResult,
+    ) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner.feedbacks.contains_key(&feedback.feedback_id) {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        let source_key = (
+            feedback.delivery_id.clone(),
+            feedback.source.external_feedback_ref.clone(),
+        );
+        if inner.feedback_sources.contains_key(&source_key) {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        let current_version = inner
+            .feedback_versions
+            .get(&feedback.feedback_id)
+            .copied()
+            .unwrap_or(0);
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        if staged.feedbacks.contains_key(&feedback.feedback_id)
+            || staged.feedback_sources.contains_key(&source_key)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut staged_feedback = feedback;
+        staged_feedback.set_version(current_version + 1);
+        staged
+            .feedback_sources
+            .insert(source_key, staged_feedback.feedback_id.clone());
+        staged
+            .feedbacks
+            .insert(staged_feedback.feedback_id.clone(), staged_feedback);
+
+        Ok(current_version + 1)
+    }
+
+    /// Returns a committed feedback result.
+    pub fn feedback(&self, feedback_id: &FeedbackId) -> Option<FeedbackResult> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .feedbacks
+            .get(feedback_id)
+            .cloned()
+    }
+
+    /// Returns all committed feedback results for tests.
+    pub fn feedbacks(&self) -> Vec<FeedbackResult> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .feedbacks
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Seeds a committed delivery aggregate for tests and fake workers.

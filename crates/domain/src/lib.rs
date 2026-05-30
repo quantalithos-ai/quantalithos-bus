@@ -4,5 +4,6 @@ pub mod audit;
 pub mod backend;
 pub mod delivery;
 pub mod errors;
+pub mod feedback;
 pub mod idempotency;
 pub mod publication;

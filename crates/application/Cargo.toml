@@ -12,3 +12,6 @@ path = "src/lib.rs"
 [dependencies]
 bus-contracts.workspace = true
 bus-domain.workspace = true
+
+[dev-dependencies]
+bus-infra = { path = "../infra" }

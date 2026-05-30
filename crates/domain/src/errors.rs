@@ -16,6 +16,8 @@ pub enum DomainError {
     InvalidDeliveryRecord(&'static str),
     /// The delivery attempt is missing a required reference or timestamp.
     InvalidDeliveryAttempt(&'static str),
+    /// The feedback result is missing a required reference or timestamp.
+    InvalidFeedbackResult(&'static str),
     /// The request digest could not be computed.
     InvalidRequestDigest,
     /// The publication material violates the payload boundary.
@@ -76,6 +78,9 @@ impl fmt::Display for DomainError {
             }
             Self::InvalidDeliveryAttempt(field) => {
                 write!(formatter, "invalid delivery attempt: {field}")
+            }
+            Self::InvalidFeedbackResult(field) => {
+                write!(formatter, "invalid feedback result: {field}")
             }
             Self::InvalidRequestDigest => formatter.write_str("invalid request digest"),
             Self::PayloadBoundaryViolation => formatter.write_str("payload boundary violation"),

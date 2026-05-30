@@ -1,9 +1,11 @@
-//! Minimal command API for publication acceptance.
+//! Minimal command APIs for publication acceptance and delivery feedback.
 
-use bus_application::{ApplicationError, ProtocolErrorCategory, PublicationAcceptanceUseCase};
-use bus_contracts::commands::AcceptPublicationCommand;
+use bus_application::{
+    ApplicationError, DeliveryFeedbackUseCase, ProtocolErrorCategory, PublicationAcceptanceUseCase,
+};
+use bus_contracts::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
 use bus_contracts::metadata::{ActorContext, CommandMetadata, RequestId, TraceContextRef};
-use bus_contracts::receipts::PublicationAcceptanceResult;
+use bus_contracts::receipts::{FeedbackRecordResult, PublicationAcceptanceResult};
 
 /// A stable API error envelope.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +82,36 @@ where
     }
 }
 
+/// Minimal command API surface for the delivery feedback write path.
+pub struct DeliveryFeedbackApi<U> {
+    feedback_recording: U,
+}
+
+impl<U> DeliveryFeedbackApi<U> {
+    /// Creates a new feedback API wrapper.
+    pub fn new(feedback_recording: U) -> Self {
+        Self { feedback_recording }
+    }
+}
+
+impl<U> DeliveryFeedbackApi<U>
+where
+    U: DeliveryFeedbackUseCase,
+{
+    /// Records one delivery feedback command into the bus write path.
+    pub async fn record_feedback(
+        &self,
+        command: RecordDeliveryFeedbackCommand,
+        actor: ActorContext,
+        meta: CommandMetadata,
+    ) -> Result<FeedbackRecordResult, ApiError> {
+        self.feedback_recording
+            .record(command, actor, meta.clone())
+            .await
+            .map_err(|error| ApiError::from_application(error, &meta))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::Future;
@@ -87,20 +119,28 @@ mod tests {
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
     use bus_application::{
-        PublicationAcceptanceService, PublicationAcceptanceServiceDeps, RepositoryError,
+        FeedbackRecordingService, FeedbackRecordingServiceDeps, PublicationAcceptanceService,
+        PublicationAcceptanceServiceDeps, RepositoryError,
     };
-    use bus_contracts::fixtures::{PublicationFixtureBuilder, TestRun, TestRunBuilder};
-    use bus_contracts::metadata::{CoreEventRef, PayloadRef, PublicationAcceptanceStatus};
+    use bus_contracts::fixtures::{
+        BackendFixtureBuilder, FeedbackFixtureBuilder, PublicationFixtureBuilder, TestRun,
+        TestRunBuilder,
+    };
+    use bus_contracts::metadata::{
+        BackendDeliveryResult, CoreEventRef, DeliveryStatus, IdempotencyKey, PayloadRef,
+        PublicationAcceptanceStatus, SubscriberRef, SubscriberScope, Timestamp,
+    };
     use bus_domain::audit::AuditAction;
+    use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
     use bus_domain::idempotency::IdempotencyScope;
     use bus_domain::publication::{PublicationMaterial, PublicationRejectReason};
     use bus_infra::{
         DeterministicIdGenerator, FixedClockAdapter, InMemoryAuditTrailRepository,
-        InMemoryIdempotencyRepository, InMemoryPublicationRepository, InMemoryUnitOfWork,
-        SharedMemoryStore,
+        InMemoryDeliveryRepository, InMemoryFeedbackRepository, InMemoryIdempotencyRepository,
+        InMemoryPublicationRepository, InMemoryUnitOfWork, SharedMemoryStore,
     };
 
-    use super::BusCommandApi;
+    use super::{BusCommandApi, DeliveryFeedbackApi};
 
     type PublicationService = PublicationAcceptanceService<
         InMemoryPublicationRepository,
@@ -111,9 +151,27 @@ mod tests {
         DeterministicIdGenerator,
     >;
 
+    type FeedbackService = FeedbackRecordingService<
+        InMemoryFeedbackRepository,
+        InMemoryDeliveryRepository,
+        InMemoryIdempotencyRepository,
+        InMemoryAuditTrailRepository,
+        InMemoryUnitOfWork,
+        FixedClockAdapter,
+        DeterministicIdGenerator,
+    >;
+
     struct Harness {
         api: BusCommandApi<PublicationService>,
         publication_repository: InMemoryPublicationRepository,
+        idempotency_repository: InMemoryIdempotencyRepository,
+        audit_repository: InMemoryAuditTrailRepository,
+    }
+
+    struct FeedbackHarness {
+        api: DeliveryFeedbackApi<FeedbackService>,
+        delivery_repository: InMemoryDeliveryRepository,
+        feedback_repository: InMemoryFeedbackRepository,
         idempotency_repository: InMemoryIdempotencyRepository,
         audit_repository: InMemoryAuditTrailRepository,
     }
@@ -168,6 +226,96 @@ mod tests {
             idempotency_repository,
             audit_repository,
         }
+    }
+
+    fn build_feedback_harness(run: &TestRun) -> FeedbackHarness {
+        let store = SharedMemoryStore::new();
+        let delivery_repository = InMemoryDeliveryRepository::new(store.clone());
+        let feedback_repository = InMemoryFeedbackRepository::new(store.clone());
+        let idempotency_repository = InMemoryIdempotencyRepository::new(store.clone());
+        let audit_repository = InMemoryAuditTrailRepository::new(store.clone());
+        let service = FeedbackRecordingService::new(FeedbackRecordingServiceDeps {
+            feedback_repository: feedback_repository.clone(),
+            delivery_repository: delivery_repository.clone(),
+            idempotency_repository: idempotency_repository.clone(),
+            audit_repository: audit_repository.clone(),
+            unit_of_work: InMemoryUnitOfWork::new(store),
+            clock: FixedClockAdapter::new(run.metadata.request.requested_at.clone()),
+            id_generator: DeterministicIdGenerator::new(),
+        });
+
+        FeedbackHarness {
+            api: DeliveryFeedbackApi::new(service),
+            delivery_repository,
+            feedback_repository,
+            idempotency_repository,
+            audit_repository,
+        }
+    }
+
+    fn seed_delivered_delivery(
+        repository: &InMemoryDeliveryRepository,
+        run: &TestRun,
+    ) -> DeliveryRecord {
+        let publication_builder = PublicationFixtureBuilder::new(run.clone());
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let material = PublicationMaterial::from_accept_publication_command(
+            publication_builder.valid_material(),
+            run.actor.clone(),
+            run.metadata.clone(),
+        )
+        .expect("publication material should be valid");
+        let capability_ref = backend_builder.in_memory_capability();
+        let semantic = bus_domain::publication::TransportSemantic::derive(
+            material,
+            capability_ref.clone(),
+            SubscriberScope {
+                project_id: format!("project_{}", run.run_id),
+                topic: format!("workitem.events.{}", run.run_id),
+            },
+        )
+        .expect("transport semantic should derive");
+        let mut delivery = DeliveryRecord::schedule(
+            semantic,
+            SubscriberRef::new("subscriber_alpha"),
+            IdempotencyKey::new(format!("idem_delivery_{}", run.run_id)),
+        )
+        .expect("delivery should schedule");
+        let mut attempt = delivery
+            .start_attempt(capability_ref, Timestamp::new("2026-05-30T00:00:01Z"))
+            .expect("delivery should start");
+        delivery
+            .append_history(DeliveryHistoryEntry::transition(
+                delivery.delivery_id.clone(),
+                DeliveryStatus::Scheduled,
+                DeliveryStatus::Dispatching,
+                bus_contracts::metadata::HistoryReason::dispatching_started(),
+                Timestamp::new("2026-05-30T00:00:01Z"),
+            ))
+            .expect("dispatch history should append");
+        attempt
+            .finish(
+                BackendDeliveryResult::delivered(Some("backend_delivery_api_feedback".into())),
+                Timestamp::new("2026-05-30T00:00:02Z"),
+            )
+            .expect("attempt should finish");
+        delivery
+            .mark_delivered(attempt, run.actor.clone())
+            .expect("delivery should become delivered");
+        delivery
+            .append_history(DeliveryHistoryEntry::transition(
+                delivery.delivery_id.clone(),
+                DeliveryStatus::Dispatching,
+                DeliveryStatus::Delivered,
+                bus_contracts::metadata::HistoryReason::delivery_arrived(),
+                Timestamp::new("2026-05-30T00:00:02Z"),
+            ))
+            .expect("delivered history should append");
+        repository
+            .seed_committed(delivery.clone())
+            .expect("delivery should seed");
+
+        delivery
     }
 
     #[test]
@@ -435,5 +583,161 @@ mod tests {
                 .committed_anchor(&scope, key)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn record_feedback_returns_completed_result_and_commits_truth() {
+        let run = TestRunBuilder::new("api-fdb-001").build();
+        let harness = build_feedback_harness(&run);
+        let delivery = seed_delivered_delivery(&harness.delivery_repository, &run);
+        let builder = FeedbackFixtureBuilder::new(run.clone());
+        let command = builder.ack_command(
+            delivery.delivery_id.clone(),
+            delivery
+                .last_attempt_ref
+                .clone()
+                .expect("delivered delivery should have attempt ref")
+                .as_str()
+                .into(),
+        );
+
+        let result = block_on(harness.api.record_feedback(
+            command.clone(),
+            run.actor.clone(),
+            run.metadata.clone(),
+        ))
+        .expect("ack feedback should record");
+
+        assert_eq!(result.delivery_status, DeliveryStatus::Completed);
+        assert_eq!(
+            result.feedback_status,
+            bus_contracts::metadata::FeedbackRecordStatus::Recorded
+        );
+        assert_eq!(harness.feedback_repository.committed_all().len(), 1);
+
+        let committed = harness
+            .delivery_repository
+            .committed(&delivery.delivery_id)
+            .expect("delivery should be committed");
+        assert_eq!(committed.status, DeliveryStatus::Completed);
+        assert_eq!(committed.history().len(), 3);
+        assert_eq!(harness.audit_repository.committed_entries().len(), 1);
+
+        let key = run
+            .metadata
+            .request
+            .idempotency_key
+            .as_ref()
+            .expect("fixture idempotency key");
+        assert!(
+            harness
+                .idempotency_repository
+                .committed_anchor(
+                    &IdempotencyScope::for_record_delivery_feedback(&command),
+                    key
+                )
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn record_feedback_same_key_same_digest_returns_existing_result() {
+        let run = TestRunBuilder::new("api-fdb-002").build();
+        let harness = build_feedback_harness(&run);
+        let delivery = seed_delivered_delivery(&harness.delivery_repository, &run);
+        let builder = FeedbackFixtureBuilder::new(run.clone());
+        let command = builder.ack_command(
+            delivery.delivery_id.clone(),
+            delivery
+                .last_attempt_ref
+                .clone()
+                .expect("delivered delivery should have attempt ref")
+                .as_str()
+                .into(),
+        );
+
+        let first = block_on(harness.api.record_feedback(
+            command.clone(),
+            run.actor.clone(),
+            run.metadata.clone(),
+        ))
+        .expect("first feedback should record");
+        let second = block_on(harness.api.record_feedback(
+            command.clone(),
+            run.actor.clone(),
+            run.metadata.clone(),
+        ))
+        .expect("same digest should return existing result");
+
+        assert_eq!(first, second);
+        assert_eq!(harness.feedback_repository.committed_all().len(), 1);
+        assert_eq!(harness.audit_repository.committed_entries().len(), 1);
+    }
+
+    #[test]
+    fn record_feedback_late_or_unknown_feedback_returns_not_found_or_conflict() {
+        let missing_run = TestRunBuilder::new("api-fdb-003").build();
+        let missing_harness = build_feedback_harness(&missing_run);
+        let missing_builder = FeedbackFixtureBuilder::new(missing_run.clone());
+        let missing_command =
+            missing_builder.ack_command("delivery_missing".into(), "attempt_missing".into());
+
+        let missing_error = block_on(missing_harness.api.record_feedback(
+            missing_command,
+            missing_run.actor.clone(),
+            missing_run.metadata.clone(),
+        ))
+        .expect_err("unknown delivery should return not found");
+
+        assert_eq!(missing_error.status_code, 404);
+        assert_eq!(missing_error.code, "not_found.delivery");
+        assert!(
+            missing_harness
+                .feedback_repository
+                .committed_all()
+                .is_empty()
+        );
+
+        let late_run = TestRunBuilder::new("api-fdb-004").build();
+        let late_harness = build_feedback_harness(&late_run);
+        let delivery = seed_delivered_delivery(&late_harness.delivery_repository, &late_run);
+        let builder = FeedbackFixtureBuilder::new(late_run.clone());
+        let ack_command = builder.ack_command(
+            delivery.delivery_id.clone(),
+            delivery
+                .last_attempt_ref
+                .clone()
+                .expect("attempt ref should exist")
+                .as_str()
+                .into(),
+        );
+        block_on(late_harness.api.record_feedback(
+            ack_command,
+            late_run.actor.clone(),
+            late_run.metadata.clone(),
+        ))
+        .expect("first ack should complete delivery");
+        let mut late_meta = late_run.metadata.clone();
+        late_meta.request.idempotency_key = Some("idem-api-fdb-004-late".into());
+        let late_command = builder.fail_command(
+            delivery.delivery_id.clone(),
+            delivery
+                .last_attempt_ref
+                .clone()
+                .expect("attempt ref should exist")
+                .as_str()
+                .into(),
+        );
+
+        let late_error = block_on(late_harness.api.record_feedback(
+            late_command,
+            late_run.actor,
+            late_meta,
+        ))
+        .expect_err("late feedback should conflict");
+
+        assert_eq!(late_error.status_code, 409);
+        assert_eq!(late_error.code, "conflict.delivery_state");
+        assert_eq!(late_harness.feedback_repository.committed_all().len(), 1);
     }
 }

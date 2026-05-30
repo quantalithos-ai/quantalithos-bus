@@ -1,7 +1,8 @@
 //! Audit records for publication write-path decisions.
 
 use bus_contracts::metadata::{
-    ActorContext, AuditRef, DeliveryId, FailureReason, IdempotencyKey, PublicationId, Timestamp,
+    ActorContext, AuditRef, DeliveryId, FailureReason, FeedbackStatus, IdempotencyKey,
+    PublicationId, Timestamp,
 };
 
 use crate::idempotency::IdempotencyScope;
@@ -36,6 +37,8 @@ pub enum AuditAction {
     DeliveryDelivered,
     /// Delivery reached `Failed`.
     DeliveryFailed(FailureReason),
+    /// Feedback was recorded for a delivery.
+    FeedbackRecorded(FeedbackStatus),
     /// A request reused an idempotency key with a different digest.
     IdempotencyConflict,
 }

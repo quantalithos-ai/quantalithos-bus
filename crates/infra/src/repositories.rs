@@ -5,16 +5,17 @@ use std::sync::{Arc, Mutex};
 
 use bus_application::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, DeliveryRepository,
-    IdempotencyRepository, PublicationRepository, RepositoryError, TransportBackendPort,
-    TransportPortError, UnitOfWorkHandle,
+    FeedbackRepository, IdempotencyRepository, PublicationRepository, RepositoryError,
+    TransportBackendPort, TransportPortError, UnitOfWorkHandle,
 };
 use bus_contracts::metadata::{
-    BackendCapabilityRef, BackendDeliveryRef, DeliveryId, DeliveryScanCursor, IdempotencyKey,
-    PublicationId, Version,
+    BackendCapabilityRef, BackendDeliveryRef, DeliveryId, DeliveryScanCursor, FeedbackId,
+    IdempotencyKey, PublicationId, Version,
 };
 use bus_domain::audit::BusAuditEntry;
 use bus_domain::backend::BackendCapabilityPolicy;
 use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
+use bus_domain::feedback::FeedbackResult;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
 use bus_domain::publication::PublicationAcceptance;
 
@@ -158,6 +159,46 @@ impl AuditTrailRepository for InMemoryAuditTrailRepository {
         }
 
         self.store.stage_audit_entry(uow.transaction_id, entry)
+    }
+}
+
+/// In-memory feedback repository.
+#[derive(Clone)]
+pub struct InMemoryFeedbackRepository {
+    store: SharedMemoryStore,
+}
+
+impl InMemoryFeedbackRepository {
+    /// Creates a new repository over the shared memory store.
+    pub fn new(store: SharedMemoryStore) -> Self {
+        Self { store }
+    }
+
+    /// Returns one committed feedback result for tests.
+    pub fn committed(&self, feedback_id: &FeedbackId) -> Option<FeedbackResult> {
+        self.store.feedback(feedback_id)
+    }
+
+    /// Returns all committed feedback results for tests.
+    pub fn committed_all(&self) -> Vec<FeedbackResult> {
+        self.store.feedbacks()
+    }
+}
+
+impl FeedbackRepository for InMemoryFeedbackRepository {
+    async fn insert(
+        &self,
+        feedback: FeedbackResult,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<Version, RepositoryError> {
+        self.store.stage_feedback(uow.transaction_id, feedback)
+    }
+
+    async fn get(
+        &self,
+        feedback_id: &FeedbackId,
+    ) -> Result<Option<FeedbackResult>, RepositoryError> {
+        Ok(self.store.feedback(feedback_id))
     }
 }
 
