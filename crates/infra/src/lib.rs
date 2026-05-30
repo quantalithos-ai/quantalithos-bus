@@ -8,7 +8,8 @@ mod uow;
 
 pub use id::DeterministicIdGenerator;
 pub use repositories::{
-    InMemoryAuditTrailRepository, InMemoryIdempotencyRepository, InMemoryPublicationRepository,
+    InMemoryAuditTrailRepository, InMemoryDeliveryRepository, InMemoryIdempotencyRepository,
+    InMemoryPublicationRepository, InMemoryTransportBackendAdapter,
 };
 pub use store::SharedMemoryStore;
 pub use time::FixedClockAdapter;

@@ -1,6 +1,8 @@
 //! Audit records for publication write-path decisions.
 
-use bus_contracts::metadata::{ActorContext, AuditRef, IdempotencyKey, PublicationId, Timestamp};
+use bus_contracts::metadata::{
+    ActorContext, AuditRef, DeliveryId, FailureReason, IdempotencyKey, PublicationId, Timestamp,
+};
 
 use crate::idempotency::IdempotencyScope;
 use crate::publication::PublicationRejectReason;
@@ -10,6 +12,8 @@ use crate::publication::PublicationRejectReason;
 pub enum SubjectRef {
     /// A publication acceptance subject.
     Publication(PublicationId),
+    /// A delivery progression subject.
+    Delivery(DeliveryId),
     /// An idempotency key scoped by operation.
     IdempotencyKey {
         /// The idempotency scope.
@@ -26,6 +30,12 @@ pub enum AuditAction {
     PublicationAccepted,
     /// A publication was rejected.
     PublicationRejected(PublicationRejectReason),
+    /// Delivery entered the dispatching state.
+    DeliveryDispatchStarted,
+    /// Delivery reached `Delivered`.
+    DeliveryDelivered,
+    /// Delivery reached `Failed`.
+    DeliveryFailed(FailureReason),
     /// A request reused an idempotency key with a different digest.
     IdempotencyConflict,
 }

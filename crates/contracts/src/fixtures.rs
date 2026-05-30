@@ -1,13 +1,14 @@
 //! Reusable fixture builders for contract and domain tests.
 
 use crate::commands::AcceptPublicationCommand;
-use crate::jobs::RunDeliveryProgressionJob;
+use crate::jobs::{DeliveryProgressionResult, RunDeliveryProgressionJob};
 use crate::metadata::{
     ActorContext, ActorKind, ActorRef, BackendCapabilityRef, BackendId, BackendKind,
     BackendProfileRef, CapabilityVersion, CommandMetadata, ConsistencyMarker, CoreEventRef,
     DeliveryAttemptId, DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, FeedbackId,
-    JobRunId, PayloadDigest, PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata,
-    RequestOrigin, SourceRecordRef, SourceSystem, TargetScope, Timestamp, TraceId,
+    JobMetadata, JobRunId, JobTriggerSource, PayloadDigest, PayloadKind, PayloadRef, PublicationId,
+    RequestId, RequestMetadata, RequestOrigin, SourceRecordRef, SourceSystem, TargetScope,
+    Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
 use crate::views::DeliveryStatusView;
@@ -59,6 +60,17 @@ impl TestRunBuilder {
                 external_ref: None,
             },
             run_id,
+        }
+    }
+
+    /// Builds deterministic job metadata for the current run.
+    pub fn build_job_metadata(&self) -> JobMetadata {
+        let run_id = self.run_id.clone();
+
+        JobMetadata {
+            job_run_id: JobRunId::new(format!("job_run_{run_id}")),
+            trace_ref: TraceId::new(format!("trace-job-{run_id}")),
+            trigger_source: JobTriggerSource::Scheduler,
         }
     }
 }
@@ -184,6 +196,29 @@ impl DeliveryFixtureBuilder {
             backend_id: BackendId::new(format!("backend_{}", self.run.run_id)),
         }
     }
+
+    /// Returns deterministic job metadata for delivery progression.
+    pub fn run_delivery_progression_metadata(&self) -> JobMetadata {
+        JobMetadata {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            trace_ref: TraceId::new(format!("trace-job-{}", self.run.run_id)),
+            trigger_source: JobTriggerSource::Scheduler,
+        }
+    }
+
+    /// Returns a valid delivery-progression summary DTO.
+    pub fn delivery_progression_result(&self) -> DeliveryProgressionResult {
+        DeliveryProgressionResult {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            scanned: 2,
+            dispatched: 1,
+            skipped: 0,
+            next_cursor: DeliveryScanCursor::new(format!(
+                "delivery_cursor_next_{}",
+                self.run.run_id
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -224,6 +259,21 @@ mod tests {
             rejection_reason_ref: Some(RejectionReasonRef::new("boundary.payload_body_rejected")),
             audit_ref: AuditRef::new("audit-001"),
         });
+    }
+
+    #[test]
+    fn job_metadata_roundtrip() {
+        let builder = TestRunBuilder::new("job-001");
+
+        roundtrip(&builder.build_job_metadata());
+    }
+
+    #[test]
+    fn delivery_progression_result_roundtrip() {
+        let run = TestRunBuilder::new("job-002").build();
+        let builder = DeliveryFixtureBuilder::new(run);
+
+        roundtrip(&builder.delivery_progression_result());
     }
 
     #[test]

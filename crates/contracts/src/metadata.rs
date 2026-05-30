@@ -272,6 +272,28 @@ pub enum ConsistencyMarker {
     Committed,
 }
 
+/// The source that triggered a one-off operations job.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobTriggerSource {
+    /// The job was started by a scheduler.
+    Scheduler,
+    /// The job was started from a CLI or operator action.
+    Cli,
+}
+
+/// Shared metadata supplied to operations jobs.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobMetadata {
+    /// The unique job run identifier.
+    pub job_run_id: JobRunId,
+    /// The trace reference attached to the job run.
+    pub trace_ref: TraceContextRef,
+    /// The trigger source that started the run.
+    pub trigger_source: JobTriggerSource,
+}
+
 /// The logical target scope requested by a publication command.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

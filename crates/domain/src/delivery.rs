@@ -4,7 +4,7 @@ use bus_contracts::metadata::{
     ActorContext, AttemptCount, AttemptNo, BackendCapabilityRef, BackendDeliveryResult,
     BackendDeliveryStatus, DeliveryAttemptId, DeliveryAttemptRef, DeliveryHistoryId, DeliveryId,
     DeliveryStatus, DeliveryTransitionRuleRef, FailureReason, HistoryReason, IdempotencyKey,
-    PublicationId, SubscriberRef, Timestamp,
+    PublicationId, SubscriberRef, Timestamp, Version,
 };
 
 use crate::errors::DomainError;
@@ -27,6 +27,10 @@ pub struct DeliveryRecord {
     pub idempotency_key: IdempotencyKey,
     /// The reference to the latest attempt, if any.
     pub last_attempt_ref: Option<DeliveryAttemptRef>,
+    transport_semantic: TransportSemantic,
+    version: Version,
+    attempts: Vec<DeliveryAttempt>,
+    history: Vec<DeliveryHistoryEntry>,
 }
 
 impl DeliveryRecord {
@@ -52,13 +56,78 @@ impl DeliveryRecord {
                 sanitize(semantic.publication_id.as_str()),
                 sanitize(subscriber_ref.as_str())
             )),
-            publication_id: semantic.publication_id,
+            publication_id: semantic.publication_id.clone(),
             subscriber_ref,
             status: DeliveryStatus::Scheduled,
             attempt_count: AttemptCount::default(),
             idempotency_key: key,
             last_attempt_ref: None,
+            transport_semantic: semantic,
+            version: 0,
+            attempts: Vec::new(),
+            history: Vec::new(),
         })
+    }
+
+    /// Returns the committed aggregate version used for optimistic updates.
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
+    /// Overwrites the aggregate version after a repository rehydrate or save.
+    pub fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
+    /// Returns the platform transport semantic associated with the delivery.
+    pub fn transport_semantic(&self) -> &TransportSemantic {
+        &self.transport_semantic
+    }
+
+    /// Returns the backend capability reference attached to the semantic.
+    pub fn backend_capability_ref(&self) -> &BackendCapabilityRef {
+        &self.transport_semantic.backend_capability_ref
+    }
+
+    /// Returns the committed attempts tracked by the delivery aggregate.
+    pub fn attempts(&self) -> &[DeliveryAttempt] {
+        &self.attempts
+    }
+
+    /// Returns the append-only history tracked by the delivery aggregate.
+    pub fn history(&self) -> &[DeliveryHistoryEntry] {
+        &self.history
+    }
+
+    /// Synchronizes a finished attempt back into the aggregate.
+    pub fn sync_attempt(&mut self, attempt: DeliveryAttempt) -> Result<(), DomainError> {
+        if attempt.delivery_id != self.delivery_id {
+            return Err(DomainError::AttemptDoesNotBelongToDelivery);
+        }
+
+        let stored = self
+            .attempts
+            .iter_mut()
+            .find(|candidate| candidate.attempt_id == attempt.attempt_id)
+            .ok_or(DomainError::AttemptRefMismatch)?;
+
+        *stored = attempt;
+        Ok(())
+    }
+
+    /// Appends a delivery-history entry after a valid state transition.
+    pub fn append_history(&mut self, entry: DeliveryHistoryEntry) -> Result<(), DomainError> {
+        if entry.delivery_id != self.delivery_id {
+            return Err(DomainError::InvalidDeliveryRecord("history.delivery_id"));
+        }
+
+        let lifecycle = DeliveryLifecycle::default_for_bus();
+        if !lifecycle.requires_history(entry.from_status, entry.to_status) {
+            return Err(DomainError::InvalidDeliveryRecord("history.transition"));
+        }
+
+        self.history.push(entry);
+        Ok(())
     }
 
     /// Starts a new delivery attempt and moves the record into dispatching.
@@ -89,6 +158,7 @@ impl DeliveryRecord {
         self.attempt_count = self.attempt_count.increment();
         self.last_attempt_ref = Some(DeliveryAttemptRef::new(attempt.attempt_id.as_str()));
         self.status = DeliveryStatus::Dispatching;
+        self.attempts.push(attempt.clone());
 
         Ok(attempt)
     }
@@ -118,6 +188,7 @@ impl DeliveryRecord {
             return Err(DomainError::AttemptOutcomeDoesNotDeliver);
         }
 
+        self.sync_attempt(attempt)?;
         self.status = DeliveryStatus::Delivered;
         Ok(())
     }

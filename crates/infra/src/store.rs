@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use bus_application::{
     CommitReceipt, RepositoryError, UnitOfWorkError, UnitOfWorkHandle, UnitOfWorkPurpose,
 };
-use bus_contracts::metadata::{IdempotencyKey, PublicationId, Version};
+use bus_contracts::metadata::{DeliveryId, IdempotencyKey, PublicationId, Version};
 use bus_domain::audit::BusAuditEntry;
+use bus_domain::delivery::DeliveryRecord;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
 use bus_domain::publication::PublicationAcceptance;
 
@@ -20,6 +21,8 @@ pub struct SharedMemoryStore {
 struct MemoryStoreInner {
     next_transaction_id: u64,
     next_audit_sequence: u64,
+    deliveries: BTreeMap<DeliveryId, DeliveryRecord>,
+    delivery_versions: BTreeMap<DeliveryId, Version>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
     publication_versions: BTreeMap<PublicationId, Version>,
     anchors: HashMap<(IdempotencyScope, IdempotencyKey), IdempotencyAnchor>,
@@ -31,6 +34,7 @@ struct MemoryStoreInner {
 #[derive(Default)]
 struct StagedTransaction {
     _purpose: Option<UnitOfWorkPurpose>,
+    deliveries: BTreeMap<DeliveryId, DeliveryRecord>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
     anchors: HashMap<(IdempotencyScope, IdempotencyKey), IdempotencyAnchor>,
     conflicts: Vec<IdempotencyConflict>,
@@ -76,6 +80,14 @@ impl SharedMemoryStore {
             .remove(&handle.transaction_id)
             .ok_or(UnitOfWorkError::InvalidHandle)?;
 
+        for (delivery_id, delivery) in staged.deliveries {
+            inner
+                .deliveries
+                .insert(delivery_id.clone(), delivery.clone());
+            inner
+                .delivery_versions
+                .insert(delivery_id, delivery.version());
+        }
         for (publication_id, acceptance) in staged.publications {
             let version = inner
                 .publication_versions
@@ -237,5 +249,83 @@ impl SharedMemoryStore {
             .expect("memory store lock poisoned")
             .audits
             .clone()
+    }
+
+    /// Seeds a committed delivery aggregate for tests and fake workers.
+    pub fn seed_delivery(&self, delivery: DeliveryRecord) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner.deliveries.contains_key(&delivery.delivery_id) {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut committed = delivery;
+        committed.set_version(1);
+        inner
+            .delivery_versions
+            .insert(committed.delivery_id.clone(), committed.version());
+        inner
+            .deliveries
+            .insert(committed.delivery_id.clone(), committed);
+        Ok(1)
+    }
+
+    /// Stages a delivery aggregate update.
+    pub fn stage_delivery_save(
+        &self,
+        transaction_id: u64,
+        delivery: DeliveryRecord,
+        expected_version: Version,
+    ) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let committed_version = inner
+            .delivery_versions
+            .get(&delivery.delivery_id)
+            .copied()
+            .ok_or(RepositoryError::VersionConflict)?;
+        if committed_version != expected_version {
+            return Err(RepositoryError::VersionConflict);
+        }
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        let mut staged_delivery = delivery;
+        staged_delivery.set_version(expected_version + 1);
+        let new_version = staged_delivery.version();
+        staged
+            .deliveries
+            .insert(staged_delivery.delivery_id.clone(), staged_delivery);
+
+        Ok(new_version)
+    }
+
+    /// Returns a committed delivery aggregate.
+    pub fn delivery(&self, delivery_id: &DeliveryId) -> Option<DeliveryRecord> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .deliveries
+            .get(delivery_id)
+            .cloned()
+    }
+
+    /// Returns committed schedulable deliveries ordered by identifier.
+    pub fn schedulable_deliveries(&self, cursor: &str, limit: u32) -> Vec<DeliveryRecord> {
+        let inner = self.inner.lock().expect("memory store lock poisoned");
+        let has_after_cursor = inner
+            .deliveries
+            .keys()
+            .any(|delivery_id| delivery_id.as_str() > cursor);
+
+        inner
+            .deliveries
+            .values()
+            .filter(|delivery| {
+                delivery.status == bus_contracts::metadata::DeliveryStatus::Scheduled
+                    && (!has_after_cursor || delivery.delivery_id.as_str() > cursor)
+            })
+            .take(limit as usize)
+            .cloned()
+            .collect()
     }
 }

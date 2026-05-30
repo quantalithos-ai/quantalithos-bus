@@ -9,6 +9,8 @@ use crate::errors::UnitOfWorkError;
 pub enum UnitOfWorkPurpose {
     /// The publication acceptance write path.
     AcceptPublication,
+    /// The delivery progression write path.
+    RunDeliveryProgression,
 }
 
 /// A rollback reason label.

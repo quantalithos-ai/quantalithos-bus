@@ -132,6 +132,19 @@ pub enum IdGenerationError {
     Exhausted,
 }
 
+/// Transport-backend port failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TransportPortError {
+    /// The backend is temporarily unavailable.
+    BackendUnavailable,
+    /// The current semantic does not match the backend capability.
+    CapabilityMismatch,
+    /// The dispatch operation timed out.
+    DispatchTimeout,
+    /// The backend returned data that must not cross the bus boundary.
+    PrivateBodyViolation,
+}
+
 /// Application failures returned by services.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplicationError {
@@ -214,6 +227,19 @@ impl ApplicationError {
             code,
             message: message.into(),
             details_ref: None,
+        })
+    }
+
+    /// Creates a not-found error.
+    pub fn not_found(
+        code: &'static str,
+        message: impl Into<String>,
+        details_ref: Option<ErrorDetailsRef>,
+    ) -> Self {
+        Self::NotFound(NotFoundError {
+            code,
+            message: message.into(),
+            details_ref,
         })
     }
 
@@ -406,5 +432,30 @@ impl From<IdGenerationError> for ApplicationError {
             false,
             None,
         )
+    }
+}
+
+impl From<TransportPortError> for ApplicationError {
+    fn from(error: TransportPortError) -> Self {
+        match error {
+            TransportPortError::BackendUnavailable | TransportPortError::DispatchTimeout => {
+                Self::dependency(
+                    "dependency.transport_backend_unavailable",
+                    "transport backend unavailable",
+                    true,
+                    None,
+                )
+            }
+            TransportPortError::CapabilityMismatch => Self::conflict(
+                "conflict.backend_capability_mapping",
+                "transport semantic does not match backend capability",
+                None,
+            ),
+            TransportPortError::PrivateBodyViolation => Self::boundary_violation(
+                "boundary.backend_private_field_rejected",
+                "backend response carried private body content",
+                None,
+            ),
+        }
     }
 }

@@ -1,0 +1,26 @@
+   Compiling bus-contracts v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/contracts)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src/lib.rs (target/debug/deps/bus_contracts-a523fa032f3ceee8)
+
+running 12 tests
+test fixtures::tests::accept_publication_command_rejects_legacy_delivery_mode_value ... ok
+test fixtures::tests::accept_publication_command_rejects_payload_body_field ... ok
+test fixtures::tests::accept_publication_command_rejects_transport_semantic_field ... ok
+test fixtures::tests::accept_publication_command_roundtrip ... ok
+test fixtures::tests::backend_capability_fixture_roundtrip ... ok
+test fixtures::tests::delivery_status_view_roundtrip ... ok
+test fixtures::tests::accept_publication_command_requires_core_event_ref_field ... ok
+test fixtures::tests::get_delivery_status_query_roundtrip ... ok
+test fixtures::tests::delivery_progression_result_roundtrip ... ok
+test fixtures::tests::job_metadata_roundtrip ... ok
+test fixtures::tests::run_delivery_progression_job_roundtrip ... ok
+test fixtures::tests::publication_acceptance_result_roundtrip ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_contracts
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

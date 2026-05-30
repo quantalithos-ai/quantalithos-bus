@@ -32,3 +32,7 @@ path = "src/bin/check_backend_capability.rs"
 [dependencies]
 bus-application.workspace = true
 bus-contracts.workspace = true
+
+[dev-dependencies]
+bus-domain = { path = "../domain" }
+bus-infra = { path = "../infra" }
