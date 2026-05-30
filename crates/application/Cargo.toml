@@ -1,0 +1,14 @@
+[package]
+name = "bus-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "bus_application"
+path = "src/lib.rs"
+
+[dependencies]
+bus-contracts.workspace = true
+bus-domain.workspace = true

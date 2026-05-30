@@ -1,0 +1,18 @@
+[package]
+name = "bus-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "bus_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bus-worker"
+path = "src/bin/bus_worker.rs"
+
+[dependencies]
+bus-application.workspace = true
+bus-contracts.workspace = true

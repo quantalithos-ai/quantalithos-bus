@@ -1,0 +1,18 @@
+[package]
+name = "bus-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "bus_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bus-api"
+path = "src/bin/bus_api.rs"
+
+[dependencies]
+bus-application.workspace = true
+bus-contracts.workspace = true

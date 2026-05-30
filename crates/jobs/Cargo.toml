@@ -1,0 +1,34 @@
+[package]
+name = "bus-jobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "bus_jobs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "run_outbox_relay"
+path = "src/bin/run_outbox_relay.rs"
+
+[[bin]]
+name = "run_delivery_progression"
+path = "src/bin/run_delivery_progression.rs"
+
+[[bin]]
+name = "run_retry_cycle"
+path = "src/bin/run_retry_cycle.rs"
+
+[[bin]]
+name = "rebuild_projection"
+path = "src/bin/rebuild_projection.rs"
+
+[[bin]]
+name = "check_backend_capability"
+path = "src/bin/check_backend_capability.rs"
+
+[dependencies]
+bus-application.workspace = true
+bus-contracts.workspace = true

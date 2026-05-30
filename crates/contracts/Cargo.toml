@@ -1,0 +1,13 @@
+[package]
+name = "bus-contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "bus_contracts"
+path = "src/lib.rs"
+
+[dependencies]
+core-contracts.workspace = true
