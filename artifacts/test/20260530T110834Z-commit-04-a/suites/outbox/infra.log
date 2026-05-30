@@ -1,0 +1,21 @@
+   Compiling bus-domain v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/domain)
+   Compiling bus-application v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/application)
+   Compiling bus-infra v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/infra)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (target/debug/deps/bus_infra-7c92e6aa21bacddf)
+
+running 5 tests
+test source::tests::outbox_source_fixture_rejects_duplicate_fact_ref ... ok
+test source::tests::outbox_source_ack_failure_replays_fact_until_ack_succeeds ... ok
+test source::tests::outbox_source_acknowledges_fact_and_skips_it_on_later_polls ... ok
+test source::tests::outbox_source_polls_committed_facts_with_cursor_progression ... ok
+test source::tests::outbox_source_rejects_unknown_cursor ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_infra
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

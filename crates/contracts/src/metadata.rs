@@ -97,7 +97,19 @@ string_newtype!(
     CapabilityVersion,
     "A backend capability version identifier."
 );
+string_newtype!(
+    CommittedOutboxFactRef,
+    "A reference to a committed upstream outbox fact."
+);
+string_newtype!(
+    ConsumerMarker,
+    "A stable consumer marker for source acknowledgements."
+);
 string_newtype!(CoreEventRef, "A reference to an L0-core event contract.");
+string_newtype!(
+    CoreEventEnvelopeRef,
+    "A reference to a committed L0-core event envelope."
+);
 string_newtype!(DeliveryAttemptId, "A stable delivery attempt identifier.");
 string_newtype!(
     DeliveryAttemptRef,
@@ -116,6 +128,8 @@ string_newtype!(
     DeliveryTransitionRuleRef,
     "A reference to the delivery transition rule set."
 );
+string_newtype!(EventId, "A stable inbound event identifier.");
+string_newtype!(EventSourceRef, "A stable inbound event source reference.");
 string_newtype!(FailureReason, "A stable delivery failure reason.");
 string_newtype!(FeedbackId, "A stable feedback identifier.");
 string_newtype!(
@@ -127,6 +141,7 @@ string_newtype!(
     OutboxFactRef,
     "A reference to a committed upstream outbox fact."
 );
+string_newtype!(OutboxCursor, "A cursor for committed outbox fact scans.");
 string_newtype!(PayloadDigest, "A digest for the referenced payload.");
 string_newtype!(PayloadRef, "A reference to an external payload body.");
 string_newtype!(
@@ -152,6 +167,11 @@ numeric_newtype!(
     "The number of attempts recorded for a delivery."
 );
 numeric_newtype!(AttemptNo, u32, "A one-based delivery attempt number.");
+numeric_newtype!(
+    PageLimit,
+    u32,
+    "A bounded page size for source and repository scans."
+);
 
 impl Default for AttemptCount {
     fn default() -> Self {
@@ -168,6 +188,13 @@ impl AttemptCount {
     /// Returns the incremented count.
     pub fn increment(self) -> Self {
         Self::new(self.get() + 1)
+    }
+}
+
+impl ConsumerMarker {
+    /// Returns the stable marker used by the bus source consumer.
+    pub fn bus() -> Self {
+        Self::new("bus")
     }
 }
 
@@ -197,6 +224,25 @@ impl FailureReason {
     /// Returns the stable reason for a normalized backend dispatch failure.
     pub fn dispatch_failed() -> Self {
         Self::new("dispatch_failed")
+    }
+}
+
+impl Default for OutboxCursor {
+    fn default() -> Self {
+        Self::origin()
+    }
+}
+
+impl OutboxCursor {
+    /// Returns the stable origin cursor for a fresh source scan.
+    pub fn origin() -> Self {
+        Self::new("origin")
+    }
+}
+
+impl From<CommittedOutboxFactRef> for OutboxFactRef {
+    fn from(value: CommittedOutboxFactRef) -> Self {
+        Self::new(value.as_str())
     }
 }
 

@@ -9,13 +9,13 @@ pub mod services;
 pub use errors::{
     ApplicationError, BoundaryViolationError, ConflictError, DependencyError, ErrorDetailsRef,
     IdGenerationError, InternalError, NotFoundError, ProtocolErrorCategory, RepositoryError,
-    TransportPortError, UnitOfWorkError, ValidationError,
+    SourcePortError, TransportPortError, UnitOfWorkError, ValidationError,
 };
 pub use ports::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, BusRecordKind,
     ClockPort, CommitReceipt, DeliveryRepository, IdGeneratorPort, IdempotencyRepository,
-    PublicationRepository, RollbackReason, TransportBackendPort, UnitOfWork, UnitOfWorkHandle,
-    UnitOfWorkPurpose,
+    OutboxFactSourcePort, PublicationRepository, RollbackReason, TransportBackendPort, UnitOfWork,
+    UnitOfWorkHandle, UnitOfWorkPurpose,
 };
 pub use services::{
     DeliveryProgressionItemResult, DeliveryProgressionService, DeliveryProgressionServiceDeps,

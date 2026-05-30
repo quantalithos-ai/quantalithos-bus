@@ -1,14 +1,16 @@
 //! Reusable fixture builders for contract and domain tests.
 
 use crate::commands::AcceptPublicationCommand;
+use crate::events::{CommittedOutboxFact, CommittedOutboxFactPage};
 use crate::jobs::{DeliveryProgressionResult, RunDeliveryProgressionJob};
 use crate::metadata::{
     ActorContext, ActorKind, ActorRef, BackendCapabilityRef, BackendId, BackendKind,
-    BackendProfileRef, CapabilityVersion, CommandMetadata, ConsistencyMarker, CoreEventRef,
-    DeliveryAttemptId, DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, FeedbackId,
-    JobMetadata, JobRunId, JobTriggerSource, PayloadDigest, PayloadKind, PayloadRef, PublicationId,
-    RequestId, RequestMetadata, RequestOrigin, SourceRecordRef, SourceSystem, TargetScope,
-    Timestamp, TraceId,
+    BackendProfileRef, CapabilityVersion, CommandMetadata, CommittedOutboxFactRef,
+    ConsistencyMarker, ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef, DeliveryAttemptId,
+    DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId, EventSourceRef,
+    FeedbackId, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor, PayloadDigest, PayloadKind,
+    PayloadRef, PublicationId, RequestId, RequestMetadata, RequestOrigin, SourceRecordRef,
+    SourceSystem, TargetScope, Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
 use crate::views::DeliveryStatusView;
@@ -148,6 +150,72 @@ impl BackendFixtureBuilder {
     }
 }
 
+/// Builds deterministic committed outbox fact fixtures for a run.
+#[derive(Clone, Debug)]
+pub struct OutboxFixtureBuilder {
+    run: TestRun,
+}
+
+impl OutboxFixtureBuilder {
+    /// Creates a new outbox fixture builder.
+    pub fn new(run: TestRun) -> Self {
+        Self { run }
+    }
+
+    /// Returns the stable origin cursor for a new source scan.
+    pub fn origin_cursor(&self) -> OutboxCursor {
+        OutboxCursor::origin()
+    }
+
+    /// Returns the stable source-consumer marker for the bus.
+    pub fn consumer_marker(&self) -> ConsumerMarker {
+        ConsumerMarker::bus()
+    }
+
+    /// Returns the first committed outbox fact for the current run.
+    pub fn committed_fact(&self) -> CommittedOutboxFact {
+        self.committed_fact_with_suffix("01")
+    }
+
+    /// Returns a second committed outbox fact for cursor and paging tests.
+    pub fn second_committed_fact(&self) -> CommittedOutboxFact {
+        self.committed_fact_with_suffix("02")
+    }
+
+    /// Returns a one-item committed-fact page.
+    pub fn committed_fact_page(&self) -> CommittedOutboxFactPage {
+        let fact = self.committed_fact();
+        CommittedOutboxFactPage {
+            next_cursor: OutboxCursor::new(format!(
+                "outbox_cursor_{}",
+                fact.committed_fact_ref.as_str()
+            )),
+            items: vec![fact],
+        }
+    }
+
+    fn committed_fact_with_suffix(&self, suffix: &str) -> CommittedOutboxFact {
+        let run_id = &self.run.run_id;
+
+        CommittedOutboxFact {
+            event_id: EventId::new(format!("event_{run_id}_{suffix}")),
+            source_ref: EventSourceRef::new(format!("l0_core_outbox_{run_id}")),
+            core_event_envelope_ref: CoreEventEnvelopeRef::new(format!(
+                "core_event_envelope_{run_id}_{suffix}"
+            )),
+            committed_fact_ref: CommittedOutboxFactRef::new(format!(
+                "outbox_fact_{run_id}_{suffix}"
+            )),
+            source_record_ref: SourceRecordRef::new(format!("core_record_{run_id}_{suffix}")),
+            payload_ref: PayloadRef::new(format!("artifact_ref_{run_id}_{suffix}")),
+            payload_digest: PayloadDigest::new(format!("sha256:{run_id}:{suffix}")),
+            idempotency_key: core_contracts::metadata::IdempotencyKey::new(format!(
+                "idem_outbox_{run_id}_{suffix}"
+            )),
+        }
+    }
+}
+
 /// Builds deterministic delivery query and job fixtures for a run.
 #[derive(Clone, Debug)]
 pub struct DeliveryFixtureBuilder {
@@ -274,6 +342,43 @@ mod tests {
         let builder = DeliveryFixtureBuilder::new(run);
 
         roundtrip(&builder.delivery_progression_result());
+    }
+
+    #[test]
+    fn committed_outbox_fact_roundtrip() {
+        let run = TestRunBuilder::new("obx-001").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.committed_fact());
+    }
+
+    #[test]
+    fn committed_outbox_fact_page_roundtrip() {
+        let run = TestRunBuilder::new("obx-002").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.committed_fact_page());
+    }
+
+    #[test]
+    fn committed_outbox_fact_rejects_payload_body_field() {
+        let run = TestRunBuilder::new("obx-003").build();
+        let builder = OutboxFixtureBuilder::new(run);
+        let mut encoded =
+            serde_json::to_value(builder.committed_fact()).expect("fact should serialize");
+
+        encoded
+            .as_object_mut()
+            .expect("fact should serialize as an object")
+            .insert(
+                "payload_body".to_owned(),
+                serde_json::Value::String("{\"secret\":\"value\"}".to_owned()),
+            );
+
+        let error = serde_json::from_value::<CommittedOutboxFact>(encoded)
+            .expect_err("payload_body should be rejected");
+
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]

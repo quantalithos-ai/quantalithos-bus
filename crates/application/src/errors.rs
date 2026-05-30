@@ -132,6 +132,19 @@ pub enum IdGenerationError {
     Exhausted,
 }
 
+/// Upstream source-port failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SourcePortError {
+    /// The upstream committed-fact source is temporarily unavailable.
+    Unavailable,
+    /// The supplied cursor is invalid for the current source snapshot.
+    CursorInvalid,
+    /// The source failed to acknowledge a committed fact after truth commit.
+    AckFailed,
+    /// The source fact crossed a protected payload boundary.
+    BoundaryViolation,
+}
+
 /// Transport-backend port failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TransportPortError {
@@ -432,6 +445,33 @@ impl From<IdGenerationError> for ApplicationError {
             false,
             None,
         )
+    }
+}
+
+impl From<SourcePortError> for ApplicationError {
+    fn from(error: SourcePortError) -> Self {
+        match error {
+            SourcePortError::Unavailable => Self::dependency(
+                "dependency.outbox_source_unavailable",
+                "outbox source unavailable",
+                true,
+                None,
+            ),
+            SourcePortError::CursorInvalid => {
+                Self::validation("validation.outbox_cursor", "outbox cursor is invalid")
+            }
+            SourcePortError::AckFailed => Self::dependency(
+                "dependency.outbox_ack_failed",
+                "outbox source acknowledgment failed",
+                true,
+                None,
+            ),
+            SourcePortError::BoundaryViolation => Self::boundary_violation(
+                "boundary.outbox_source_fact_rejected",
+                "outbox source fact violated the bus boundary policy",
+                None,
+            ),
+        }
     }
 }
 
