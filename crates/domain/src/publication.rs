@@ -2,12 +2,14 @@
 
 use bus_contracts::commands::AcceptPublicationCommand;
 use bus_contracts::metadata::{
-    ActorContext, AuditRef, CommandMetadata, CoreEventRef, DeliveryMode, ForbiddenBodyPolicyRef,
-    OutboxFactRef, PayloadDigest, PayloadKind, PayloadRef, PublicationAcceptanceId,
-    PublicationAcceptanceStatus, PublicationId, RejectionReasonRef, SourceRecordRef, SourceSystem,
-    TargetScope, Timestamp, TraceContextRef,
+    ActorContext, AuditRef, BackendCapabilityRef, CommandMetadata, CoreEventRef, DeliveryMode,
+    ForbiddenBodyPolicyRef, OutboxFactRef, PayloadDigest, PayloadKind, PayloadRef,
+    PublicationAcceptanceId, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
+    SourceRecordRef, SourceSystem, SubscriberScope, TargetScope, Timestamp, TraceContextRef,
+    TransportSemanticId,
 };
 
+use crate::backend::BackendCapabilityPolicy;
 use crate::errors::DomainError;
 
 /// Publication material references carried into the bus.
@@ -107,6 +109,79 @@ impl PublicationMaterial {
     /// Returns whether the material originated from outbox relay input.
     pub fn is_from_outbox(&self) -> bool {
         self.outbox_fact_ref.is_some()
+    }
+}
+
+/// Platform-level transport semantic derived from accepted publication material.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransportSemantic {
+    /// The stable transport semantic identifier.
+    pub semantic_id: TransportSemanticId,
+    /// The associated publication identifier.
+    pub publication_id: PublicationId,
+    /// The platform delivery mode.
+    pub delivery_mode: DeliveryMode,
+    /// The normalized subscriber scope.
+    pub target_scope: SubscriberScope,
+    /// The selected backend capability reference.
+    pub backend_capability_ref: BackendCapabilityRef,
+}
+
+impl TransportSemantic {
+    /// Derives transport semantic from accepted publication material and backend capability.
+    pub fn derive(
+        material: PublicationMaterial,
+        capability_ref: BackendCapabilityRef,
+        target_scope: SubscriberScope,
+    ) -> Result<Self, DomainError> {
+        if target_scope.project_id.trim().is_empty() {
+            return Err(DomainError::InvalidSubscriberScope("project_id"));
+        }
+        if target_scope.topic.trim().is_empty() {
+            return Err(DomainError::InvalidSubscriberScope("topic"));
+        }
+
+        let declared_scope = SubscriberScope::from(material.target_scope.clone());
+        if declared_scope != target_scope {
+            return Err(DomainError::TargetScopeMismatch);
+        }
+
+        let semantic = Self {
+            semantic_id: TransportSemanticId::new(format!(
+                "semantic_{}_{}",
+                sanitize(material.publication_id.as_str()),
+                sanitize(capability_ref.capability_id.as_str())
+            )),
+            publication_id: material.publication_id,
+            delivery_mode: material.delivery_mode,
+            target_scope,
+            backend_capability_ref: capability_ref.clone(),
+        };
+
+        let policy = BackendCapabilityPolicy::from_capability(capability_ref.clone());
+        if policy.rejects_raw_backend_leak(semantic.clone()) {
+            return Err(DomainError::BackendPrivateFieldLeak);
+        }
+        if !policy.allows_mapping(semantic.clone(), capability_ref) {
+            return Err(DomainError::BackendCapabilityMappingRejected);
+        }
+
+        Ok(semantic)
+    }
+
+    /// Returns whether the semantic requires a durable delivery record.
+    pub fn requires_durable_record(&self) -> bool {
+        matches!(self.delivery_mode, DeliveryMode::AtLeastOnce)
+    }
+
+    /// Returns whether the semantic matches the provided subscriber scope.
+    pub fn matches_scope(&self, scope: SubscriberScope) -> bool {
+        self.target_scope == scope
+    }
+
+    /// Returns whether the semantic uses the provided backend capability.
+    pub fn uses_backend(&self, capability_ref: BackendCapabilityRef) -> bool {
+        self.backend_capability_ref == capability_ref
     }
 }
 
@@ -281,8 +356,12 @@ fn sanitize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use bus_contracts::fixtures::{PublicationFixtureBuilder, TestRunBuilder};
-    use bus_contracts::metadata::{AuditRef, PublicationAcceptanceStatus, Timestamp};
+    use bus_contracts::fixtures::{
+        BackendFixtureBuilder, PublicationFixtureBuilder, TestRunBuilder,
+    };
+    use bus_contracts::metadata::{
+        AuditRef, PublicationAcceptanceStatus, SubscriberScope, Timestamp,
+    };
 
     use super::*;
 
@@ -462,5 +541,83 @@ mod tests {
         let guard = PayloadBoundaryGuard::default_for_bus();
 
         assert!(guard.rejects_body(material));
+    }
+
+    #[test]
+    fn transport_semantic_derives_from_accepted_material() {
+        let run = TestRunBuilder::new("pub-domain-003").build();
+        let actor = run.actor.clone();
+        let publication_builder = PublicationFixtureBuilder::new(run.clone());
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let material = PublicationMaterial::from_accept_publication_command(
+            publication_builder.valid_material(),
+            actor,
+            run.metadata,
+        )
+        .expect("fixture should build valid material");
+        let scope = SubscriberScope {
+            project_id: format!("project_{}", run.run_id),
+            topic: format!("workitem.events.{}", run.run_id),
+        };
+        let capability_ref = backend_builder.in_memory_capability();
+
+        let semantic = TransportSemantic::derive(material, capability_ref.clone(), scope.clone())
+            .expect("semantic should derive");
+
+        assert!(semantic.requires_durable_record());
+        assert!(semantic.matches_scope(scope));
+        assert!(semantic.uses_backend(capability_ref));
+    }
+
+    #[test]
+    fn transport_semantic_rejects_scope_mismatch() {
+        let run = TestRunBuilder::new("pub-domain-004").build();
+        let actor = run.actor.clone();
+        let publication_builder = PublicationFixtureBuilder::new(run.clone());
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let material = PublicationMaterial::from_accept_publication_command(
+            publication_builder.valid_material(),
+            actor,
+            run.metadata,
+        )
+        .expect("fixture should build valid material");
+
+        let error = TransportSemantic::derive(
+            material,
+            backend_builder.in_memory_capability(),
+            SubscriberScope {
+                project_id: "different_project".to_owned(),
+                topic: "different.topic".to_owned(),
+            },
+        )
+        .expect_err("mismatched scope should be rejected");
+
+        assert_eq!(error, DomainError::TargetScopeMismatch);
+    }
+
+    #[test]
+    fn transport_semantic_rejects_backend_private_leak() {
+        let run = TestRunBuilder::new("pub-domain-005").build();
+        let actor = run.actor.clone();
+        let publication_builder = PublicationFixtureBuilder::new(run.clone());
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let material = PublicationMaterial::from_accept_publication_command(
+            publication_builder.valid_material(),
+            actor,
+            run.metadata,
+        )
+        .expect("fixture should build valid material");
+
+        let error = TransportSemantic::derive(
+            material,
+            backend_builder.tainted_capability(),
+            SubscriberScope {
+                project_id: format!("project_{}", run.run_id),
+                topic: format!("workitem.events.{}", run.run_id),
+            },
+        )
+        .expect_err("tainted capability should be rejected");
+
+        assert_eq!(error, DomainError::BackendPrivateFieldLeak);
     }
 }

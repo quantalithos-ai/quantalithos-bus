@@ -1,11 +1,16 @@
-//! Reusable fixture builders for publication contract and domain tests.
+//! Reusable fixture builders for contract and domain tests.
 
 use crate::commands::AcceptPublicationCommand;
+use crate::jobs::RunDeliveryProgressionJob;
 use crate::metadata::{
-    ActorContext, ActorKind, ActorRef, CommandMetadata, CoreEventRef, DeliveryMode, PayloadDigest,
-    PayloadKind, PayloadRef, RequestId, RequestMetadata, RequestOrigin, SourceRecordRef,
-    SourceSystem, TargetScope, Timestamp, TraceId,
+    ActorContext, ActorKind, ActorRef, BackendCapabilityRef, BackendId, BackendKind,
+    BackendProfileRef, CapabilityVersion, CommandMetadata, ConsistencyMarker, CoreEventRef,
+    DeliveryAttemptId, DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, FeedbackId,
+    JobRunId, PayloadDigest, PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata,
+    RequestOrigin, SourceRecordRef, SourceSystem, TargetScope, Timestamp, TraceId,
 };
+use crate::queries::GetDeliveryStatusQuery;
+use crate::views::DeliveryStatusView;
 
 /// The shared baseline data for a deterministic test run.
 #[derive(Clone, Debug)]
@@ -95,6 +100,92 @@ impl PublicationFixtureBuilder {
     }
 }
 
+/// Builds deterministic backend capability fixtures for a run.
+#[derive(Clone, Debug)]
+pub struct BackendFixtureBuilder {
+    run: TestRun,
+}
+
+impl BackendFixtureBuilder {
+    /// Creates a new backend fixture builder.
+    pub fn new(run: TestRun) -> Self {
+        Self { run }
+    }
+
+    /// Returns the default in-memory backend capability reference.
+    pub fn in_memory_capability(&self) -> BackendCapabilityRef {
+        BackendCapabilityRef::from_profile(
+            BackendProfileRef::new(format!("profile_{}", self.run.run_id)),
+            BackendKind::InMemory,
+            CapabilityVersion::new("v1"),
+        )
+    }
+
+    /// Returns a backend capability reference that should be rejected as a leak.
+    pub fn tainted_capability(&self) -> BackendCapabilityRef {
+        BackendCapabilityRef::from_profile(
+            BackendProfileRef::new("amqp://user:secret@example.internal"),
+            BackendKind::InMemory,
+            CapabilityVersion::new("v1"),
+        )
+    }
+
+    /// Returns the logical backend identifier used by job DTO fixtures.
+    pub fn backend_id(&self) -> BackendId {
+        BackendId::new(format!("backend_{}", self.run.run_id))
+    }
+}
+
+/// Builds deterministic delivery query and job fixtures for a run.
+#[derive(Clone, Debug)]
+pub struct DeliveryFixtureBuilder {
+    run: TestRun,
+}
+
+impl DeliveryFixtureBuilder {
+    /// Creates a new delivery fixture builder.
+    pub fn new(run: TestRun) -> Self {
+        Self { run }
+    }
+
+    /// Returns a stable delivery identifier.
+    pub fn delivery_id(&self) -> DeliveryId {
+        DeliveryId::new(format!("delivery_{}", self.run.run_id))
+    }
+
+    /// Returns a valid delivery-status query DTO.
+    pub fn delivery_status_query(&self) -> GetDeliveryStatusQuery {
+        GetDeliveryStatusQuery {
+            delivery_id: self.delivery_id(),
+        }
+    }
+
+    /// Returns a valid delivery-status view DTO.
+    pub fn delivery_status_view(&self, status: DeliveryStatus) -> DeliveryStatusView {
+        DeliveryStatusView {
+            delivery_id: self.delivery_id(),
+            publication_id: PublicationId::new(format!("pub_{}", self.run.run_id)),
+            delivery_status: status,
+            current_attempt_id: Some(DeliveryAttemptId::new(format!(
+                "attempt_{}",
+                self.run.run_id
+            ))),
+            last_feedback_id: Some(FeedbackId::new(format!("feedback_{}", self.run.run_id))),
+            consistency_marker: ConsistencyMarker::Committed,
+        }
+    }
+
+    /// Returns a valid delivery-progression job input DTO.
+    pub fn run_delivery_progression_job(&self) -> RunDeliveryProgressionJob {
+        RunDeliveryProgressionJob {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            cursor: DeliveryScanCursor::new(format!("delivery_cursor_{}", self.run.run_id)),
+            batch_size: 50,
+            backend_id: BackendId::new(format!("backend_{}", self.run.run_id)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
@@ -102,7 +193,7 @@ mod tests {
 
     use super::*;
     use crate::metadata::{
-        AuditRef, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
+        AuditRef, DeliveryStatus, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
     };
     use crate::receipts::PublicationAcceptanceResult;
 
@@ -214,5 +305,37 @@ mod tests {
             .expect_err("legacy delivery_mode should be rejected");
 
         assert!(error.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn get_delivery_status_query_roundtrip() {
+        let run = TestRunBuilder::new("dlv-001").build();
+        let builder = DeliveryFixtureBuilder::new(run);
+
+        roundtrip(&builder.delivery_status_query());
+    }
+
+    #[test]
+    fn delivery_status_view_roundtrip() {
+        let run = TestRunBuilder::new("dlv-002").build();
+        let builder = DeliveryFixtureBuilder::new(run);
+
+        roundtrip(&builder.delivery_status_view(DeliveryStatus::Delivered));
+    }
+
+    #[test]
+    fn run_delivery_progression_job_roundtrip() {
+        let run = TestRunBuilder::new("job-001").build();
+        let builder = DeliveryFixtureBuilder::new(run);
+
+        roundtrip(&builder.run_delivery_progression_job());
+    }
+
+    #[test]
+    fn backend_capability_fixture_roundtrip() {
+        let run = TestRunBuilder::new("bnd-001").build();
+        let builder = BackendFixtureBuilder::new(run);
+
+        roundtrip(&builder.in_memory_capability());
     }
 }

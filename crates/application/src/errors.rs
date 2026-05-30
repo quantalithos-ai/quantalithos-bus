@@ -287,6 +287,18 @@ impl From<DomainError> for ApplicationError {
                 "validation.publication_material",
                 format!("invalid publication material field: {field}"),
             ),
+            DomainError::InvalidSubscriberScope(field) => Self::validation(
+                "validation.subscriber_scope",
+                format!("invalid subscriber scope field: {field}"),
+            ),
+            DomainError::InvalidDeliveryRecord(field) => Self::validation(
+                "validation.delivery_record",
+                format!("invalid delivery record field: {field}"),
+            ),
+            DomainError::InvalidDeliveryAttempt(field) => Self::validation(
+                "validation.delivery_attempt",
+                format!("invalid delivery attempt field: {field}"),
+            ),
             DomainError::InvalidRequestDigest => Self::internal(
                 "internal.request_digest",
                 "request digest could not be computed",
@@ -303,6 +315,29 @@ impl From<DomainError> for ApplicationError {
             | DomainError::PublicationRejectedCannotScheduleDelivery => {
                 Self::conflict("conflict.publication_state", error.to_string(), None)
             }
+            DomainError::InvalidDeliveryTransition { .. }
+            | DomainError::TerminalDeliveryStateReopenRejected
+            | DomainError::AttemptNotFinished
+            | DomainError::AttemptAlreadyFinished
+            | DomainError::AttemptDoesNotBelongToDelivery
+            | DomainError::AttemptOutcomeDoesNotDeliver
+            | DomainError::AttemptRefMismatch
+            | DomainError::AttemptFinishedBeforeStart => {
+                Self::conflict("conflict.delivery_state", error.to_string(), None)
+            }
+            DomainError::TargetScopeMismatch | DomainError::NonDurableTransportSemantic => {
+                Self::validation("validation.transport_semantic", error.to_string())
+            }
+            DomainError::BackendCapabilityMappingRejected => Self::conflict(
+                "conflict.backend_capability_mapping",
+                error.to_string(),
+                None,
+            ),
+            DomainError::BackendPrivateFieldLeak => Self::boundary_violation(
+                "boundary.backend_private_field_rejected",
+                error.to_string(),
+                None,
+            ),
         }
     }
 }

@@ -1,0 +1,15 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_domain-bca8efd304aeb827)
+
+running 8 tests
+test delivery::tests::delivery_attempt_rejects_finishing_twice ... ok
+test delivery::tests::delivery_history_entry_describes_transition ... ok
+test delivery::tests::delivery_record_rejects_skip_attempt_transition ... ok
+test delivery::tests::delivery_lifecycle_requires_history_for_allowed_transition ... ok
+test delivery::tests::delivery_record_starts_scheduled ... ok
+test delivery::tests::delivery_record_rejects_reopening_after_delivered ... ok
+test delivery::tests::delivery_record_marks_failed_from_dispatching ... ok
+test delivery::tests::delivery_record_starts_attempt_and_marks_delivered ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+

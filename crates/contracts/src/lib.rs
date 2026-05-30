@@ -2,7 +2,10 @@
 
 pub mod commands;
 pub mod fixtures;
+pub mod jobs;
 pub mod metadata;
+pub mod queries;
 pub mod receipts;
+pub mod views;
 
 pub use core_contracts;
