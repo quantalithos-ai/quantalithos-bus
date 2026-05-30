@@ -43,3 +43,45 @@ impl PublicationAcceptanceResult {
         }
     }
 }
+
+/// The stable relay outcome returned by the outbox consumer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutboxRelayStatus {
+    /// A new publication acceptance was committed from the source fact.
+    Accepted,
+    /// The source fact matched an existing committed result.
+    Duplicate,
+}
+
+/// The result returned after consuming one committed outbox fact.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutboxRelayResult {
+    /// The stable publication identifier.
+    pub publication_id: PublicationId,
+    /// The resulting relay status.
+    pub relay_status: OutboxRelayStatus,
+    /// The audit entry that records the committed decision.
+    pub audit_ref: AuditRef,
+}
+
+impl OutboxRelayResult {
+    /// Creates a result for a newly accepted outbox fact.
+    pub fn accepted(publication_id: PublicationId, audit_ref: AuditRef) -> Self {
+        Self {
+            publication_id,
+            relay_status: OutboxRelayStatus::Accepted,
+            audit_ref,
+        }
+    }
+
+    /// Creates a result for a duplicate outbox fact that matched committed truth.
+    pub fn duplicate(publication_id: PublicationId, audit_ref: AuditRef) -> Self {
+        Self {
+            publication_id,
+            relay_status: OutboxRelayStatus::Duplicate,
+            audit_ref,
+        }
+    }
+}

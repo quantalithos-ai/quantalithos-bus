@@ -2,7 +2,77 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{BackendId, DeliveryScanCursor, JobRunId};
+use crate::metadata::{BackendId, DeliveryScanCursor, JobRunId, OutboxCursor};
+
+/// Scans committed outbox facts and relays them into bus publication acceptance.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunOutboxRelayJob {
+    /// The unique job run identifier.
+    pub job_run_id: JobRunId,
+    /// The committed-outbox scan cursor.
+    pub cursor: OutboxCursor,
+    /// The maximum number of facts to scan in the current batch.
+    pub batch_size: u32,
+    /// Whether the job should avoid mutating downstream state.
+    pub dry_run: bool,
+}
+
+/// The summary returned after an outbox-relay job run.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutboxRelayJobResult {
+    /// The unique job run identifier.
+    pub job_run_id: JobRunId,
+    /// The number of facts scanned in the batch.
+    pub scanned: u32,
+    /// The number of facts that were accepted or deduplicated successfully.
+    pub accepted: u32,
+    /// The number of facts that were committed as rejected.
+    pub rejected: u32,
+    /// The next cursor to use for a following batch.
+    pub next_cursor: OutboxCursor,
+}
+
+impl OutboxRelayJobResult {
+    /// Starts a new outbox-relay summary.
+    pub fn start(job_run_id: JobRunId, next_cursor: OutboxCursor) -> Self {
+        Self {
+            job_run_id,
+            scanned: 0,
+            accepted: 0,
+            rejected: 0,
+            next_cursor,
+        }
+    }
+
+    /// Records one accepted or deduplicated item.
+    pub fn record_accepted(&mut self) {
+        self.scanned += 1;
+        self.accepted += 1;
+    }
+
+    /// Records one rejected item.
+    pub fn record_rejected(&mut self) {
+        self.scanned += 1;
+        self.rejected += 1;
+    }
+
+    /// Records one failed item.
+    pub fn record_failed(&mut self) {
+        self.scanned += 1;
+    }
+
+    /// Updates the next scan cursor.
+    pub fn set_next_cursor(&mut self, next_cursor: OutboxCursor) {
+        self.next_cursor = next_cursor;
+    }
+
+    /// Returns the number of failed items in the batch.
+    pub fn failed(&self) -> u32 {
+        self.scanned - self.accepted - self.rejected
+    }
+}
 
 /// Scans schedulable deliveries and progresses them through the default backend path.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

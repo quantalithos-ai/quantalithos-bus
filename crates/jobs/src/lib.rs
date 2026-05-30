@@ -1,7 +1,9 @@
 //! Operations job runners for the bus workspace.
 
-use bus_application::{ApplicationError, DeliveryProgressionUseCase};
-use bus_contracts::jobs::{DeliveryProgressionResult, RunDeliveryProgressionJob};
+use bus_application::{ApplicationError, DeliveryProgressionUseCase, OutboxRelayUseCase};
+use bus_contracts::jobs::{
+    DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
+};
 use bus_contracts::metadata::{ActorContext, JobMetadata};
 
 /// Stable job-level error categories.
@@ -72,6 +74,36 @@ where
     }
 }
 
+/// Job runner for committed outbox relay.
+pub struct OutboxRelayJobRunner<S> {
+    relay_service: S,
+}
+
+impl<S> OutboxRelayJobRunner<S> {
+    /// Creates a new outbox-relay job runner.
+    pub fn new(relay_service: S) -> Self {
+        Self { relay_service }
+    }
+}
+
+impl<S> OutboxRelayJobRunner<S>
+where
+    S: OutboxRelayUseCase,
+{
+    /// Runs one outbox-relay batch.
+    pub async fn run(
+        &self,
+        job: RunOutboxRelayJob,
+        actor: ActorContext,
+        meta: JobMetadata,
+    ) -> Result<OutboxRelayJobResult, JobError> {
+        self.relay_service
+            .run(job, actor, meta)
+            .await
+            .map_err(JobError::from)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::Future;
@@ -79,18 +111,22 @@ mod tests {
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
     use bus_application::{
-        DeliveryProgressionService, DeliveryProgressionServiceDeps, TransportPortError,
+        DeliveryProgressionService, DeliveryProgressionServiceDeps, OutboxRelayService,
+        OutboxRelayServiceDeps, PublicationAcceptanceService, PublicationAcceptanceServiceDeps,
+        SourcePortError, TransportPortError,
     };
     use bus_contracts::fixtures::{
-        BackendFixtureBuilder, DeliveryFixtureBuilder, PublicationFixtureBuilder, TestRun,
-        TestRunBuilder,
+        BackendFixtureBuilder, DeliveryFixtureBuilder, OutboxFixtureBuilder,
+        PublicationFixtureBuilder, TestRun, TestRunBuilder,
     };
     use bus_contracts::metadata::{IdempotencyKey, SubscriberRef, SubscriberScope};
     use bus_domain::delivery::DeliveryRecord;
     use bus_domain::publication::{PublicationMaterial, TransportSemantic};
     use bus_infra::{
-        FixedClockAdapter, InMemoryAuditTrailRepository, InMemoryDeliveryRepository,
-        InMemoryTransportBackendAdapter, InMemoryUnitOfWork, SharedMemoryStore,
+        DeterministicIdGenerator, FixedClockAdapter, InMemoryAuditTrailRepository,
+        InMemoryDeliveryRepository, InMemoryIdempotencyRepository, InMemoryOutboxFactSourceAdapter,
+        InMemoryPublicationRepository, InMemoryTransportBackendAdapter, InMemoryUnitOfWork,
+        SharedMemoryStore, SharedOutboxSource,
     };
 
     use super::*;
@@ -152,6 +188,61 @@ mod tests {
         .expect("fixture should schedule delivery")
     }
 
+    fn outbox_runner(
+        run: &TestRun,
+        source: SharedOutboxSource,
+    ) -> (
+        OutboxRelayJobRunner<
+            OutboxRelayService<
+                InMemoryOutboxFactSourceAdapter,
+                PublicationAcceptanceService<
+                    InMemoryPublicationRepository,
+                    InMemoryIdempotencyRepository,
+                    InMemoryAuditTrailRepository,
+                    InMemoryUnitOfWork,
+                    FixedClockAdapter,
+                    DeterministicIdGenerator,
+                >,
+            >,
+        >,
+        InMemoryPublicationRepository,
+    ) {
+        let store = SharedMemoryStore::new();
+        let publication_repository = InMemoryPublicationRepository::new(store.clone());
+        let acceptance_service =
+            PublicationAcceptanceService::new(PublicationAcceptanceServiceDeps {
+                publication_repository: publication_repository.clone(),
+                idempotency_repository: InMemoryIdempotencyRepository::new(store.clone()),
+                audit_repository: InMemoryAuditTrailRepository::new(store.clone()),
+                unit_of_work: InMemoryUnitOfWork::new(store),
+                clock: FixedClockAdapter::new(run.metadata.request.requested_at.clone()),
+                id_generator: DeterministicIdGenerator::default(),
+            });
+        let relay_service = OutboxRelayService::new(OutboxRelayServiceDeps {
+            outbox_source: InMemoryOutboxFactSourceAdapter::new(source),
+            publication_service: acceptance_service,
+        });
+
+        (
+            OutboxRelayJobRunner::new(relay_service),
+            publication_repository,
+        )
+    }
+
+    fn expected_publication_id(
+        run: &TestRun,
+        fact: bus_contracts::events::CommittedOutboxFact,
+        builder: &OutboxFixtureBuilder,
+    ) -> bus_contracts::metadata::PublicationId {
+        PublicationMaterial::from_outbox_fact(
+            bus_contracts::events::CommittedOutboxFactInput::from_fact(fact),
+            run.actor.clone(),
+            builder.event_metadata(),
+        )
+        .expect("fixture should build publication material")
+        .publication_id
+    }
+
     #[test]
     fn delivery_progression_job_runner_isolates_success_and_failure_items() {
         let builder = TestRunBuilder::new("job-runner-001");
@@ -207,6 +298,143 @@ mod tests {
                 .expect("second delivery should remain committed")
                 .status,
             bus_contracts::metadata::DeliveryStatus::Failed
+        );
+    }
+
+    #[test]
+    fn outbox_relay_job_runner_accepts_committed_batch_and_advances_cursor() {
+        let run = TestRunBuilder::new("job-outbox-001").build();
+        let builder = OutboxFixtureBuilder::new(run.clone());
+        let source = SharedOutboxSource::new();
+        let first = builder.committed_fact();
+        let second = builder.second_committed_fact();
+        let first_publication_id = expected_publication_id(&run, first.clone(), &builder);
+        source
+            .seed_committed(first)
+            .expect("first fact should seed");
+        source
+            .seed_committed(second)
+            .expect("second fact should seed");
+        let (runner, publication_repository) = outbox_runner(&run, source);
+
+        let result = block_on(runner.run(
+            builder.run_outbox_relay_job(),
+            run.actor.clone(),
+            builder.run_outbox_relay_metadata(),
+        ));
+
+        let result = result.expect("outbox relay should succeed");
+        assert_eq!(result.scanned, 2);
+        assert_eq!(result.accepted, 2);
+        assert_eq!(result.rejected, 0);
+        assert_eq!(result.failed(), 0);
+        assert_ne!(result.next_cursor, builder.origin_cursor());
+        assert_eq!(
+            publication_repository
+                .committed(&first_publication_id)
+                .expect("first publication should be committed")
+                .status,
+            bus_contracts::metadata::PublicationAcceptanceStatus::Accepted
+        );
+    }
+
+    #[test]
+    fn outbox_relay_job_runner_continues_after_rejected_item() {
+        let run = TestRunBuilder::new("job-outbox-002").build();
+        let builder = OutboxFixtureBuilder::new(run.clone());
+        let source = SharedOutboxSource::new();
+        source
+            .seed_committed(builder.committed_fact_missing_core_event_ref())
+            .expect("rejected fact should seed");
+        let accepted_fact = builder.second_committed_fact();
+        let accepted_publication_id =
+            expected_publication_id(&run, accepted_fact.clone(), &builder);
+        source
+            .seed_committed(accepted_fact)
+            .expect("accepted fact should seed");
+        let (runner, publication_repository) = outbox_runner(&run, source);
+
+        let result = block_on(runner.run(
+            builder.run_outbox_relay_job(),
+            run.actor.clone(),
+            builder.run_outbox_relay_metadata(),
+        ))
+        .expect("partial rejected batch should still return a summary");
+
+        assert_eq!(result.scanned, 2);
+        assert_eq!(result.accepted, 1);
+        assert_eq!(result.rejected, 1);
+        assert_eq!(result.failed(), 0);
+        assert_eq!(
+            publication_repository
+                .committed(&accepted_publication_id)
+                .expect("accepted publication should still commit")
+                .status,
+            bus_contracts::metadata::PublicationAcceptanceStatus::Accepted
+        );
+    }
+
+    #[test]
+    fn outbox_relay_job_runner_maps_source_unavailable_to_retryable_error() {
+        let run = TestRunBuilder::new("job-outbox-003").build();
+        let builder = OutboxFixtureBuilder::new(run.clone());
+        let source = SharedOutboxSource::new();
+        source.fail_next_poll(SourcePortError::Unavailable);
+        let (runner, _) = outbox_runner(&run, source);
+
+        let error = block_on(runner.run(
+            builder.run_outbox_relay_job(),
+            run.actor,
+            builder.run_outbox_relay_metadata(),
+        ))
+        .expect_err("source unavailability should fail the whole job");
+
+        assert_eq!(error.result_kind, JobErrorKind::Retryable);
+        assert_eq!(error.code, "dependency.outbox_source_unavailable");
+    }
+
+    #[test]
+    fn outbox_relay_job_runner_replays_after_ack_failure_without_duplicate_truth() {
+        let run = TestRunBuilder::new("job-outbox-004").build();
+        let builder = OutboxFixtureBuilder::new(run.clone());
+        let source = SharedOutboxSource::new();
+        let fact = builder.committed_fact();
+        let publication_id = expected_publication_id(&run, fact.clone(), &builder);
+        source
+            .seed_committed(fact.clone())
+            .expect("fact should seed");
+        source.fail_next_ack(SourcePortError::AckFailed);
+        let (runner, publication_repository) = outbox_runner(&run, source.clone());
+
+        let first = block_on(runner.run(
+            builder.run_outbox_relay_job(),
+            run.actor.clone(),
+            builder.run_outbox_relay_metadata(),
+        ))
+        .expect("ack failure should stay in the batch summary");
+        let second = block_on(runner.run(
+            builder.run_outbox_relay_job(),
+            run.actor,
+            builder.run_outbox_relay_metadata(),
+        ))
+        .expect("replayed fact should deduplicate and ack successfully");
+
+        assert_eq!(first.accepted, 0);
+        assert_eq!(first.rejected, 0);
+        assert_eq!(first.failed(), 1);
+        assert_eq!(first.next_cursor, builder.origin_cursor());
+        assert_eq!(second.accepted, 1);
+        assert_eq!(second.failed(), 0);
+        assert_eq!(
+            publication_repository
+                .committed(&publication_id)
+                .expect("publication should remain committed exactly once")
+                .status,
+            bus_contracts::metadata::PublicationAcceptanceStatus::Accepted
+        );
+        assert_eq!(
+            source.acknowledged_marker(&fact.committed_fact_ref),
+            Some(bus_contracts::metadata::ConsumerMarker::bus())
         );
     }
 }

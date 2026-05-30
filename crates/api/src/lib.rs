@@ -261,11 +261,17 @@ mod tests {
     }
 
     #[test]
-    fn accept_publication_missing_core_event_ref_returns_validation_without_truth() {
+    fn accept_publication_missing_core_event_ref_returns_validation_with_rejected_truth() {
         let run = TestRunBuilder::new("api-pub-003").build();
         let builder = PublicationFixtureBuilder::new(run.clone());
         let mut command = builder.valid_material();
         command.core_event_ref = CoreEventRef::new("");
+        let material = PublicationMaterial::from_accept_publication_command(
+            command.clone(),
+            run.actor.clone(),
+            run.metadata.clone(),
+        )
+        .expect("missing core_event_ref still forms material for rejection");
         let harness = build_harness(&run);
 
         let error = block_on(harness.api.accept_publication(
@@ -276,8 +282,18 @@ mod tests {
         .expect_err("missing core_event_ref must fail validation");
 
         assert_eq!(error.status_code, 400);
-        assert_eq!(error.code, "validation.publication_material");
-        assert!(harness.audit_repository.committed_entries().is_empty());
+        assert_eq!(error.code, "validation.core_event_ref_missing");
+
+        let committed = harness
+            .publication_repository
+            .committed(&material.publication_id)
+            .expect("rejected publication should be committed");
+        assert_eq!(committed.status, PublicationAcceptanceStatus::Rejected);
+        assert_eq!(
+            committed.reject_reason,
+            Some(PublicationRejectReason::MissingCoreEventRef)
+        );
+        assert_eq!(harness.audit_repository.committed_entries().len(), 1);
 
         let key = run
             .metadata
@@ -290,7 +306,7 @@ mod tests {
             harness
                 .idempotency_repository
                 .committed_anchor(&scope, key)
-                .is_none()
+                .is_some()
         );
     }
 

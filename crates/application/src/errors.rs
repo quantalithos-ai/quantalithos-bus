@@ -217,6 +217,14 @@ impl ApplicationError {
         matches!(self, Self::Dependency(error) if error.retryable)
     }
 
+    /// Returns whether the error should be treated as a rejected consumer item.
+    pub fn is_rejected_item(&self) -> bool {
+        matches!(
+            self,
+            Self::Validation(_) | Self::Conflict(_) | Self::BoundaryViolation(_)
+        )
+    }
+
     /// Returns whether the error requires manual intervention.
     pub fn requires_manual_action(&self) -> bool {
         matches!(self, Self::Internal(error) if error.manual_action_required)

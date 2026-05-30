@@ -1,6 +1,7 @@
 //! Idempotency and request-digest domain objects.
 
 use bus_contracts::commands::AcceptPublicationCommand;
+use bus_contracts::events::CommittedOutboxFactInput;
 use bus_contracts::metadata::{IdempotencyKey, PublicationId, Timestamp, TraceContextRef};
 
 use crate::errors::DomainError;
@@ -10,6 +11,8 @@ use crate::errors::DomainError;
 pub enum IdempotencyEntryKind {
     /// A synchronous command boundary.
     Command,
+    /// An inbound event-consumer boundary.
+    Event,
 }
 
 /// Declares which business action is protected by idempotency.
@@ -17,6 +20,8 @@ pub enum IdempotencyEntryKind {
 pub enum IdempotencyAction {
     /// The publication acceptance command.
     AcceptPublication,
+    /// The committed outbox fact consumer.
+    ConsumeCommittedOutboxFact,
 }
 
 /// A stable idempotency scope.
@@ -39,6 +44,19 @@ impl IdempotencyScope {
             boundary_ref: Some(format!(
                 "{}::{}",
                 command.target_scope.project_id, command.target_scope.topic
+            )),
+        }
+    }
+
+    /// Builds the event scope for `ConsumeCommittedOutboxFact`.
+    pub fn for_outbox_fact(input: &CommittedOutboxFactInput) -> Self {
+        Self {
+            entry_kind: IdempotencyEntryKind::Event,
+            action: IdempotencyAction::ConsumeCommittedOutboxFact,
+            boundary_ref: Some(format!(
+                "{}::{}",
+                input.source_ref.as_str(),
+                input.event_id.as_str()
             )),
         }
     }
@@ -66,6 +84,21 @@ impl RequestDigest {
         command: &AcceptPublicationCommand,
     ) -> Result<Self, DomainError> {
         let payload = serde_json::to_vec(command).map_err(|_| DomainError::InvalidRequestDigest)?;
+        let mut hash = 0xcbf29ce484222325_u64;
+        for byte in payload {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+
+        Ok(Self {
+            value: format!("{hash:016x}"),
+            algorithm_version: DigestAlgorithmVersion::Fnv1a64V1,
+        })
+    }
+
+    /// Computes the request digest for `ConsumeCommittedOutboxFact`.
+    pub fn from_outbox_fact_input(input: &CommittedOutboxFactInput) -> Result<Self, DomainError> {
+        let payload = serde_json::to_vec(input).map_err(|_| DomainError::InvalidRequestDigest)?;
         let mut hash = 0xcbf29ce484222325_u64;
         for byte in payload {
             hash ^= u64::from(byte);
@@ -153,4 +186,55 @@ pub struct IdempotencyConflict {
     pub occurred_at: Timestamp,
     /// The trace reference attached to the conflicting request.
     pub trace_ref: TraceContextRef,
+}
+
+#[cfg(test)]
+mod tests {
+    use bus_contracts::fixtures::{
+        OutboxFixtureBuilder, PublicationFixtureBuilder, TestRunBuilder,
+    };
+
+    use super::*;
+
+    #[test]
+    fn outbox_fact_scope_uses_source_and_event_identity() {
+        let run = TestRunBuilder::new("idem-001").build();
+        let builder = OutboxFixtureBuilder::new(run);
+        let input = builder.committed_fact_input();
+
+        let scope = IdempotencyScope::for_outbox_fact(&input);
+
+        assert_eq!(scope.entry_kind, IdempotencyEntryKind::Event);
+        assert_eq!(scope.action, IdempotencyAction::ConsumeCommittedOutboxFact);
+        assert_eq!(
+            scope.boundary_ref,
+            Some(format!(
+                "{}::{}",
+                input.source_ref.as_str(),
+                input.event_id.as_str()
+            ))
+        );
+    }
+
+    #[test]
+    fn outbox_fact_digest_changes_with_fact_content() {
+        let run = TestRunBuilder::new("idem-002").build();
+        let builder = OutboxFixtureBuilder::new(run.clone());
+        let first = builder.committed_fact_input();
+        let mut second = builder.committed_fact_input();
+        second.payload_digest = bus_contracts::metadata::PayloadDigest::new("sha256:changed");
+
+        let first_digest =
+            RequestDigest::from_outbox_fact_input(&first).expect("digest should be computed");
+        let second_digest =
+            RequestDigest::from_outbox_fact_input(&second).expect("digest should be computed");
+
+        assert_ne!(first_digest, second_digest);
+
+        let command_builder = PublicationFixtureBuilder::new(run);
+        let command_digest =
+            RequestDigest::from_accept_publication_command(&command_builder.valid_material())
+                .expect("command digest should be computed");
+        assert_ne!(first_digest, command_digest);
+    }
 }

@@ -1,10 +1,12 @@
 //! Publication acceptance write-path service.
 
 use bus_contracts::commands::AcceptPublicationCommand;
+use bus_contracts::events::CommittedOutboxFactInput;
 use bus_contracts::metadata::{
-    ActorContext, AuditRef, CommandMetadata, IdempotencyKey, PublicationAcceptanceStatus,
+    ActorContext, AuditRef, CommandMetadata, EventMetadata, IdempotencyKey,
+    PublicationAcceptanceStatus, TraceContextRef,
 };
-use bus_contracts::receipts::PublicationAcceptanceResult;
+use bus_contracts::receipts::{OutboxRelayResult, PublicationAcceptanceResult};
 use bus_domain::audit::{AuditAction, BusAuditEntry, SubjectRef};
 use bus_domain::idempotency::{
     IdempotencyAnchor, IdempotencyConflict, IdempotencyScope, RecordRef, RequestDigest,
@@ -28,6 +30,17 @@ pub trait PublicationAcceptanceUseCase: Send + Sync {
         actor: ActorContext,
         meta: CommandMetadata,
     ) -> Result<PublicationAcceptanceResult, ApplicationError>;
+}
+
+/// The committed-outbox publication acceptance use-case contract.
+pub trait OutboxPublicationAcceptanceUseCase: Send + Sync {
+    /// Accepts or rejects one committed outbox fact.
+    async fn accept_from_outbox_fact(
+        &self,
+        input: CommittedOutboxFactInput,
+        actor: ActorContext,
+        meta: EventMetadata,
+    ) -> Result<OutboxRelayResult, ApplicationError>;
 }
 
 /// Dependencies for the publication acceptance service.
@@ -71,11 +84,11 @@ where
     C: ClockPort,
     G: IdGeneratorPort,
 {
-    async fn rollback_with(
+    async fn rollback_with<TValue>(
         &self,
         handle: crate::ports::UnitOfWorkHandle,
         error: ApplicationError,
-    ) -> Result<PublicationAcceptanceResult, ApplicationError> {
+    ) -> Result<TValue, ApplicationError> {
         let code = error.code();
         self.deps
             .unit_of_work
@@ -143,6 +156,16 @@ where
         })
     }
 
+    fn error_from_rejected_result(result: &PublicationAcceptanceResult) -> ApplicationError {
+        if result.rejection_reason_ref.as_ref()
+            == Some(&PublicationRejectReason::PayloadBoundaryViolation.reason_ref())
+        {
+            Self::boundary_error_from_result(result)
+        } else {
+            Self::validation_error_from_rejected_result(result)
+        }
+    }
+
     async fn load_existing_result(
         &self,
         anchor: &IdempotencyAnchor,
@@ -172,20 +195,24 @@ where
         }
     }
 
+    fn duplicate_outbox_result(existing_result: &PublicationAcceptanceResult) -> OutboxRelayResult {
+        OutboxRelayResult::duplicate(
+            existing_result.publication_id.clone(),
+            existing_result.audit_ref.clone(),
+        )
+    }
+
     async fn begin_idempotency_conflict(
         &self,
+        purpose: UnitOfWorkPurpose,
         scope: IdempotencyScope,
         key: IdempotencyKey,
         existing_anchor: IdempotencyAnchor,
         incoming_digest: RequestDigest,
         actor: ActorContext,
-        meta: CommandMetadata,
+        trace_ref: TraceContextRef,
     ) -> Result<PublicationAcceptanceResult, ApplicationError> {
-        let handle = self
-            .deps
-            .unit_of_work
-            .begin(UnitOfWorkPurpose::AcceptPublication, actor.clone())
-            .await?;
+        let handle = self.deps.unit_of_work.begin(purpose, actor.clone()).await?;
         let now = self.deps.clock.now();
         let audit_ref = AuditRef::new(
             self.deps
@@ -198,7 +225,7 @@ where
             existing_digest: existing_anchor.request_digest.clone(),
             incoming_digest,
             occurred_at: now.clone(),
-            trace_ref: meta.request.trace_id.clone(),
+            trace_ref: trace_ref.clone(),
         };
         let audit_entry = BusAuditEntry::record(
             audit_ref.clone(),
@@ -208,7 +235,7 @@ where
             },
             AuditAction::IdempotencyConflict,
             actor,
-            meta.request.trace_id,
+            trace_ref,
             now,
         );
 
@@ -247,19 +274,16 @@ where
 
     async fn commit_publication_decision(
         &self,
+        purpose: UnitOfWorkPurpose,
         mut acceptance: PublicationAcceptance,
         actor: ActorContext,
-        meta: CommandMetadata,
+        trace_ref: TraceContextRef,
         request_digest: RequestDigest,
         scope: IdempotencyScope,
         idempotency_key: IdempotencyKey,
         reason: Option<PublicationRejectReason>,
     ) -> Result<PublicationAcceptanceResult, ApplicationError> {
-        let handle = self
-            .deps
-            .unit_of_work
-            .begin(UnitOfWorkPurpose::AcceptPublication, actor.clone())
-            .await?;
+        let handle = self.deps.unit_of_work.begin(purpose, actor.clone()).await?;
         let now = self.deps.clock.now();
         let audit_ref = AuditRef::new(
             self.deps
@@ -286,7 +310,7 @@ where
             SubjectRef::Publication(acceptance.publication_id.clone()),
             audit_action,
             actor,
-            meta.request.trace_id.clone(),
+            trace_ref.clone(),
             now.clone(),
         );
         let anchor = IdempotencyAnchor::bind(
@@ -298,7 +322,7 @@ where
             request_digest,
             RecordRef::Publication(acceptance.publication_id.clone()),
             now,
-            meta.request.trace_id,
+            trace_ref,
         );
 
         if let Err(error) = self
@@ -370,25 +394,20 @@ where
                 return if existing_result.acceptance_status == PublicationAcceptanceStatus::Accepted
                 {
                     Ok(existing_result)
-                } else if existing_result.rejection_reason_ref.as_ref()
-                    == Some(&PublicationRejectReason::PayloadBoundaryViolation.reason_ref())
-                {
-                    Err(Self::boundary_error_from_result(&existing_result))
                 } else {
-                    Err(Self::validation_error_from_rejected_result(
-                        &existing_result,
-                    ))
+                    Err(Self::error_from_rejected_result(&existing_result))
                 };
             }
 
             return self
                 .begin_idempotency_conflict(
+                    UnitOfWorkPurpose::AcceptPublication,
                     scope,
                     idempotency_key,
                     existing_anchor,
                     request_digest,
                     actor,
-                    meta,
+                    meta.request.trace_id,
                 )
                 .await;
         }
@@ -401,12 +420,29 @@ where
         let acceptance = PublicationAcceptance::start_pending(material.clone(), actor.clone())
             .map_err(ApplicationError::from)?;
 
+        if !material.has_core_contract() {
+            let result = self
+                .commit_publication_decision(
+                    UnitOfWorkPurpose::AcceptPublication,
+                    acceptance,
+                    actor,
+                    meta.request.trace_id,
+                    request_digest,
+                    scope,
+                    idempotency_key,
+                    Some(PublicationRejectReason::MissingCoreEventRef),
+                )
+                .await?;
+            return Err(Self::validation_error_from_rejected_result(&result));
+        }
+
         if self.payload_guard.rejects_body(material) {
             let result = self
                 .commit_publication_decision(
+                    UnitOfWorkPurpose::AcceptPublication,
                     acceptance,
                     actor,
-                    meta,
+                    meta.request.trace_id,
                     request_digest,
                     scope,
                     idempotency_key,
@@ -417,14 +453,121 @@ where
         }
 
         self.commit_publication_decision(
+            UnitOfWorkPurpose::AcceptPublication,
             acceptance,
             actor,
-            meta,
+            meta.request.trace_id,
             request_digest,
             scope,
             idempotency_key,
             None,
         )
         .await
+    }
+}
+
+impl<P, I, A, U, C, G> OutboxPublicationAcceptanceUseCase
+    for PublicationAcceptanceService<P, I, A, U, C, G>
+where
+    P: PublicationRepository,
+    I: IdempotencyRepository,
+    A: AuditTrailRepository,
+    U: UnitOfWork,
+    C: ClockPort,
+    G: IdGeneratorPort,
+{
+    async fn accept_from_outbox_fact(
+        &self,
+        input: CommittedOutboxFactInput,
+        actor: ActorContext,
+        meta: EventMetadata,
+    ) -> Result<OutboxRelayResult, ApplicationError> {
+        let idempotency_key = input.idempotency_key.clone();
+        let scope = IdempotencyScope::for_outbox_fact(&input);
+        let request_digest = RequestDigest::from_outbox_fact_input(&input)?;
+
+        if let Some(existing_anchor) = self
+            .deps
+            .idempotency_repository
+            .find(&scope, &idempotency_key)
+            .await?
+        {
+            if existing_anchor.matches(&request_digest) {
+                let existing_result = self.load_existing_result(&existing_anchor).await?;
+                return if existing_result.acceptance_status == PublicationAcceptanceStatus::Accepted
+                {
+                    Ok(Self::duplicate_outbox_result(&existing_result))
+                } else {
+                    Err(Self::error_from_rejected_result(&existing_result))
+                };
+            }
+
+            return self
+                .begin_idempotency_conflict(
+                    UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                    scope,
+                    idempotency_key,
+                    existing_anchor,
+                    request_digest,
+                    actor,
+                    meta.trace_ref,
+                )
+                .await
+                .map(|_| unreachable!("outbox conflict always returns an error"));
+        }
+
+        let material = PublicationMaterial::from_outbox_fact(input, actor.clone(), meta.clone())?;
+        let acceptance = PublicationAcceptance::start_pending(material.clone(), actor.clone())
+            .map_err(ApplicationError::from)?;
+
+        if !material.has_core_contract() {
+            let result = self
+                .commit_publication_decision(
+                    UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                    acceptance,
+                    actor,
+                    meta.trace_ref,
+                    request_digest,
+                    scope,
+                    idempotency_key,
+                    Some(PublicationRejectReason::MissingCoreEventRef),
+                )
+                .await?;
+            return Err(Self::validation_error_from_rejected_result(&result));
+        }
+
+        if self.payload_guard.rejects_body(material) {
+            let result = self
+                .commit_publication_decision(
+                    UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                    acceptance,
+                    actor,
+                    meta.trace_ref,
+                    request_digest,
+                    scope,
+                    idempotency_key,
+                    Some(PublicationRejectReason::PayloadBoundaryViolation),
+                )
+                .await?;
+            return Err(Self::boundary_error_from_result(&result));
+        }
+
+        let result = self
+            .commit_publication_decision(
+                UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                acceptance,
+                actor,
+                meta.trace_ref,
+                request_digest,
+                scope,
+                idempotency_key,
+                None,
+            )
+            .await?;
+
+        Ok(OutboxRelayResult::accepted(
+            result.publication_id,
+            result.audit_ref,
+        ))
     }
 }

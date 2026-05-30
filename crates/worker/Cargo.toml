@@ -16,3 +16,6 @@ path = "src/bin/bus_worker.rs"
 [dependencies]
 bus-application.workspace = true
 bus-contracts.workspace = true
+
+[dev-dependencies]
+bus-infra = { path = "../infra" }

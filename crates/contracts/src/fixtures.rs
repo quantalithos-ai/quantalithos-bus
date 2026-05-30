@@ -1,18 +1,21 @@
 //! Reusable fixture builders for contract and domain tests.
 
 use crate::commands::AcceptPublicationCommand;
-use crate::events::{CommittedOutboxFact, CommittedOutboxFactPage};
-use crate::jobs::{DeliveryProgressionResult, RunDeliveryProgressionJob};
+use crate::events::{CommittedOutboxFact, CommittedOutboxFactInput, CommittedOutboxFactPage};
+use crate::jobs::{
+    DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
+};
 use crate::metadata::{
     ActorContext, ActorKind, ActorRef, BackendCapabilityRef, BackendId, BackendKind,
     BackendProfileRef, CapabilityVersion, CommandMetadata, CommittedOutboxFactRef,
     ConsistencyMarker, ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef, DeliveryAttemptId,
-    DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId, EventSourceRef,
-    FeedbackId, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor, PayloadDigest, PayloadKind,
-    PayloadRef, PublicationId, RequestId, RequestMetadata, RequestOrigin, SourceRecordRef,
-    SourceSystem, TargetScope, Timestamp, TraceId,
+    DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId, EventMetadata,
+    EventSourceRef, FeedbackId, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor,
+    PayloadDigest, PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata,
+    RequestOrigin, SourceRecordRef, SourceSystem, TargetScope, Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
+use crate::receipts::{OutboxRelayResult, OutboxRelayStatus};
 use crate::views::DeliveryStatusView;
 
 /// The shared baseline data for a deterministic test run.
@@ -194,6 +197,64 @@ impl OutboxFixtureBuilder {
         }
     }
 
+    /// Returns the consumer-ready input converted from the first committed fact.
+    pub fn committed_fact_input(&self) -> CommittedOutboxFactInput {
+        CommittedOutboxFactInput::from_fact(self.committed_fact())
+    }
+
+    /// Returns a committed fact with an empty core event reference for rejection tests.
+    pub fn committed_fact_missing_core_event_ref(&self) -> CommittedOutboxFact {
+        let mut fact = self.committed_fact();
+        fact.core_event_ref = CoreEventRef::new("");
+        fact
+    }
+
+    /// Returns a valid outbox-relay job input DTO.
+    pub fn run_outbox_relay_job(&self) -> RunOutboxRelayJob {
+        RunOutboxRelayJob {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            cursor: self.origin_cursor(),
+            batch_size: 50,
+            dry_run: false,
+        }
+    }
+
+    /// Returns deterministic job metadata for outbox relay.
+    pub fn run_outbox_relay_metadata(&self) -> JobMetadata {
+        JobMetadata {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            trace_ref: TraceId::new(format!("trace-job-{}", self.run.run_id)),
+            trigger_source: JobTriggerSource::Scheduler,
+        }
+    }
+
+    /// Returns deterministic consumer metadata for the current run.
+    pub fn event_metadata(&self) -> EventMetadata {
+        EventMetadata {
+            trace_ref: TraceId::new(format!("trace-event-{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a valid outbox-relay summary DTO.
+    pub fn outbox_relay_result(&self) -> OutboxRelayJobResult {
+        OutboxRelayJobResult {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            scanned: 2,
+            accepted: 1,
+            rejected: 1,
+            next_cursor: OutboxCursor::new(format!("outbox_cursor_next_{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a valid outbox-relay receipt DTO.
+    pub fn relay_receipt(&self) -> OutboxRelayResult {
+        OutboxRelayResult {
+            publication_id: PublicationId::new(format!("pub_{}", self.run.run_id)),
+            relay_status: OutboxRelayStatus::Accepted,
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+
     fn committed_fact_with_suffix(&self, suffix: &str) -> CommittedOutboxFact {
         let run_id = &self.run.run_id;
 
@@ -203,12 +264,20 @@ impl OutboxFixtureBuilder {
             core_event_envelope_ref: CoreEventEnvelopeRef::new(format!(
                 "core_event_envelope_{run_id}_{suffix}"
             )),
+            core_event_ref: CoreEventRef::new(format!("core_event_contract_{run_id}_{suffix}")),
             committed_fact_ref: CommittedOutboxFactRef::new(format!(
                 "outbox_fact_{run_id}_{suffix}"
             )),
+            source_system: SourceSystem::new("l0-core"),
             source_record_ref: SourceRecordRef::new(format!("core_record_{run_id}_{suffix}")),
             payload_ref: PayloadRef::new(format!("artifact_ref_{run_id}_{suffix}")),
+            payload_kind: PayloadKind::ArtifactRef,
             payload_digest: PayloadDigest::new(format!("sha256:{run_id}:{suffix}")),
+            delivery_mode: DeliveryMode::AtLeastOnce,
+            target_scope: TargetScope {
+                project_id: format!("project_{run_id}"),
+                topic: format!("workitem.events.{run_id}"),
+            },
             idempotency_key: core_contracts::metadata::IdempotencyKey::new(format!(
                 "idem_outbox_{run_id}_{suffix}"
             )),
@@ -337,6 +406,14 @@ mod tests {
     }
 
     #[test]
+    fn event_metadata_roundtrip() {
+        let run = TestRunBuilder::new("evt-001").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.event_metadata());
+    }
+
+    #[test]
     fn delivery_progression_result_roundtrip() {
         let run = TestRunBuilder::new("job-002").build();
         let builder = DeliveryFixtureBuilder::new(run);
@@ -361,8 +438,16 @@ mod tests {
     }
 
     #[test]
-    fn committed_outbox_fact_rejects_payload_body_field() {
+    fn committed_outbox_fact_input_roundtrip() {
         let run = TestRunBuilder::new("obx-003").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.committed_fact_input());
+    }
+
+    #[test]
+    fn committed_outbox_fact_rejects_payload_body_field() {
+        let run = TestRunBuilder::new("obx-004").build();
         let builder = OutboxFixtureBuilder::new(run);
         let mut encoded =
             serde_json::to_value(builder.committed_fact()).expect("fact should serialize");
@@ -484,6 +569,30 @@ mod tests {
         let builder = DeliveryFixtureBuilder::new(run);
 
         roundtrip(&builder.run_delivery_progression_job());
+    }
+
+    #[test]
+    fn run_outbox_relay_job_roundtrip() {
+        let run = TestRunBuilder::new("job-003").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.run_outbox_relay_job());
+    }
+
+    #[test]
+    fn outbox_relay_job_result_roundtrip() {
+        let run = TestRunBuilder::new("job-004").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.outbox_relay_result());
+    }
+
+    #[test]
+    fn outbox_relay_result_roundtrip() {
+        let run = TestRunBuilder::new("obx-005").build();
+        let builder = OutboxFixtureBuilder::new(run);
+
+        roundtrip(&builder.relay_receipt());
     }
 
     #[test]

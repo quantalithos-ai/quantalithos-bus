@@ -1,12 +1,13 @@
 //! Publication acceptance domain objects and payload boundary policies.
 
 use bus_contracts::commands::AcceptPublicationCommand;
+use bus_contracts::events::CommittedOutboxFactInput;
 use bus_contracts::metadata::{
-    ActorContext, AuditRef, BackendCapabilityRef, CommandMetadata, CoreEventRef, DeliveryMode,
-    ForbiddenBodyPolicyRef, OutboxFactRef, PayloadDigest, PayloadKind, PayloadRef,
-    PublicationAcceptanceId, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
-    SourceRecordRef, SourceSystem, SubscriberScope, TargetScope, Timestamp, TraceContextRef,
-    TransportSemanticId,
+    ActorContext, AuditRef, BackendCapabilityRef, CommandMetadata, CoreEventEnvelopeRef,
+    CoreEventRef, DeliveryMode, EventMetadata, ForbiddenBodyPolicyRef, OutboxFactRef,
+    PayloadDigest, PayloadKind, PayloadRef, PublicationAcceptanceId, PublicationAcceptanceStatus,
+    PublicationId, RejectionReasonRef, SourceRecordRef, SourceSystem, SubscriberScope, TargetScope,
+    Timestamp, TraceContextRef, TransportSemanticId,
 };
 
 use crate::backend::BackendCapabilityPolicy;
@@ -23,6 +24,8 @@ pub struct PublicationMaterial {
     pub source_record_ref: SourceRecordRef,
     /// The referenced L0-core event contract.
     pub core_event_ref: CoreEventRef,
+    /// The optional committed L0-core event-envelope reference.
+    pub core_event_envelope_ref: Option<CoreEventEnvelopeRef>,
     /// The referenced payload body location.
     pub payload_ref: PayloadRef,
     /// The declared payload reference kind.
@@ -54,9 +57,6 @@ impl PublicationMaterial {
         if command.source_record_ref.as_str().trim().is_empty() {
             return Err(DomainError::InvalidPublicationMaterial("source_record_ref"));
         }
-        if command.core_event_ref.as_str().trim().is_empty() {
-            return Err(DomainError::InvalidPublicationMaterial("core_event_ref"));
-        }
         if command.payload_ref.as_str().trim().is_empty() {
             return Err(DomainError::InvalidPublicationMaterial("payload_ref"));
         }
@@ -85,6 +85,7 @@ impl PublicationMaterial {
             source_system: command.source_system,
             source_record_ref: command.source_record_ref,
             core_event_ref: command.core_event_ref,
+            core_event_envelope_ref: None,
             payload_ref: command.payload_ref,
             payload_kind: command.payload_kind,
             payload_digest: command.payload_digest,
@@ -93,6 +94,63 @@ impl PublicationMaterial {
             outbox_fact_ref: None,
             actor,
             trace_ref: meta.request.trace_id,
+        })
+    }
+
+    /// Builds publication material from one committed outbox fact input.
+    pub fn from_outbox_fact(
+        input: CommittedOutboxFactInput,
+        actor: ActorContext,
+        meta: EventMetadata,
+    ) -> Result<Self, DomainError> {
+        if input.source_system.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial("source_system"));
+        }
+        if input.source_record_ref.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial("source_record_ref"));
+        }
+        if input.core_event_envelope_ref.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial(
+                "core_event_envelope_ref",
+            ));
+        }
+        if input.payload_ref.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial("payload_ref"));
+        }
+        if input.payload_digest.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial("payload_digest"));
+        }
+        if input.target_scope.project_id.trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial(
+                "target_scope.project_id",
+            ));
+        }
+        if input.target_scope.topic.trim().is_empty() {
+            return Err(DomainError::InvalidPublicationMaterial(
+                "target_scope.topic",
+            ));
+        }
+
+        let publication_id = PublicationId::new(format!(
+            "pub_{}_{}",
+            sanitize(input.source_system.as_str()),
+            sanitize(input.source_record_ref.as_str())
+        ));
+
+        Ok(Self {
+            publication_id,
+            source_system: input.source_system,
+            source_record_ref: input.source_record_ref,
+            core_event_ref: input.core_event_ref,
+            core_event_envelope_ref: Some(input.core_event_envelope_ref),
+            payload_ref: input.payload_ref,
+            payload_kind: input.payload_kind,
+            payload_digest: input.payload_digest,
+            delivery_mode: input.delivery_mode,
+            target_scope: input.target_scope,
+            outbox_fact_ref: Some(input.committed_fact_ref.into()),
+            actor,
+            trace_ref: meta.trace_ref,
         })
     }
 
@@ -231,9 +289,6 @@ impl PublicationAcceptance {
         material: PublicationMaterial,
         _actor: ActorContext,
     ) -> Result<Self, DomainError> {
-        if !material.has_core_contract() {
-            return Err(DomainError::InvalidPublicationMaterial("core_event_ref"));
-        }
         if !material.has_payload_reference() {
             return Err(DomainError::InvalidPublicationMaterial("payload_ref"));
         }
@@ -386,6 +441,7 @@ mod tests {
         assert!(material.has_core_contract());
         assert!(material.has_payload_reference());
         assert!(!material.is_from_outbox());
+        assert_eq!(material.core_event_envelope_ref, None);
         assert!(material.trace_ref.as_str().contains("trace-pub-domain-001"));
         assert!(material.source_system.as_str().contains("l2-process"));
         assert!(
@@ -395,6 +451,58 @@ mod tests {
                 .contains("process_event")
         );
         assert_eq!(material.delivery_mode, DeliveryMode::AtLeastOnce);
+    }
+
+    #[test]
+    fn publication_material_from_outbox_fact_preserves_envelope_and_delivery_inputs() {
+        let run = TestRunBuilder::new("pub-domain-001-outbox").build();
+        let actor = run.actor.clone();
+        let builder = bus_contracts::fixtures::OutboxFixtureBuilder::new(run.clone());
+        let fact = builder.committed_fact();
+        let expected_envelope_ref = fact.core_event_envelope_ref.clone();
+        let expected_core_event_ref = fact.core_event_ref.clone();
+        let expected_target_scope = fact.target_scope.clone();
+
+        let material = PublicationMaterial::from_outbox_fact(
+            CommittedOutboxFactInput::from_fact(fact.clone()),
+            actor,
+            builder.event_metadata(),
+        )
+        .expect("fixture should build valid outbox material");
+
+        assert!(material.is_from_outbox());
+        assert_eq!(material.core_event_ref, expected_core_event_ref);
+        assert_eq!(
+            material.core_event_envelope_ref,
+            Some(expected_envelope_ref)
+        );
+        assert_eq!(material.delivery_mode, DeliveryMode::AtLeastOnce);
+        assert_eq!(material.target_scope, expected_target_scope);
+        assert_eq!(
+            material.outbox_fact_ref,
+            Some(OutboxFactRef::from(fact.committed_fact_ref))
+        );
+    }
+
+    #[test]
+    fn publication_acceptance_can_start_pending_without_core_event_ref() {
+        let run = TestRunBuilder::new("pub-domain-001-reject").build();
+        let actor = run.actor.clone();
+        let builder = PublicationFixtureBuilder::new(run.clone());
+        let mut command = builder.valid_material();
+        command.core_event_ref = CoreEventRef::new("");
+        let material = PublicationMaterial::from_accept_publication_command(
+            command,
+            actor.clone(),
+            run.metadata,
+        )
+        .expect("missing core event ref is evaluated by the acceptance decision");
+
+        let acceptance = PublicationAcceptance::start_pending(material.clone(), actor)
+            .expect("pending acceptance should start before rejection");
+
+        assert_eq!(acceptance.publication_id, material.publication_id);
+        assert_eq!(acceptance.status, PublicationAcceptanceStatus::Pending);
     }
 
     #[test]

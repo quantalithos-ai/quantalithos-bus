@@ -1,0 +1,48 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_jobs-53c10fca84b65a12)
+
+running 5 tests
+test tests::outbox_relay_job_runner_maps_source_unavailable_to_retryable_error ... ok
+test tests::outbox_relay_job_runner_continues_after_rejected_item ... ok
+test tests::outbox_relay_job_runner_replays_after_ack_failure_without_duplicate_truth ... ok
+test tests::delivery_progression_job_runner_isolates_success_and_failure_items ... ok
+test tests::outbox_relay_job_runner_accepts_committed_batch_and_advances_cursor ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/check_backend_capability.rs (target/debug/deps/check_backend_capability-064574a7cad1c5de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/rebuild_projection.rs (target/debug/deps/rebuild_projection-8a8b6115f36b54cb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_delivery_progression.rs (target/debug/deps/run_delivery_progression-5eb0f94e39172873)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_outbox_relay.rs (target/debug/deps/run_outbox_relay-7fc58d7589c44155)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_retry_cycle.rs (target/debug/deps/run_retry_cycle-8a920c36a16cac71)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_jobs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

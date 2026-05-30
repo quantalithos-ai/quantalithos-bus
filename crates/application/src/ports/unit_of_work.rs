@@ -9,6 +9,8 @@ use crate::errors::UnitOfWorkError;
 pub enum UnitOfWorkPurpose {
     /// The publication acceptance write path.
     AcceptPublication,
+    /// The committed outbox fact consumer write path.
+    ConsumeCommittedOutboxFact,
     /// The delivery progression write path.
     RunDeliveryProgression,
 }

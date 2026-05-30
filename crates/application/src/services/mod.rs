@@ -1,12 +1,15 @@
 //! Application service implementations.
 
 mod delivery;
+mod outbox;
 mod publication;
 
 pub use delivery::{
     DeliveryProgressionItemResult, DeliveryProgressionService, DeliveryProgressionServiceDeps,
     DeliveryProgressionUseCase,
 };
+pub use outbox::{OutboxRelayService, OutboxRelayServiceDeps, OutboxRelayUseCase};
 pub use publication::{
-    PublicationAcceptanceService, PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
+    OutboxPublicationAcceptanceUseCase, PublicationAcceptanceService,
+    PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
 };

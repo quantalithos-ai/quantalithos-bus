@@ -340,6 +340,23 @@ pub struct JobMetadata {
     pub trigger_source: JobTriggerSource,
 }
 
+/// Shared metadata supplied to inbound event consumers.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventMetadata {
+    /// The trace reference attached to the inbound event.
+    pub trace_ref: TraceContextRef,
+}
+
+impl EventMetadata {
+    /// Builds consumer metadata from an operations job context.
+    pub fn from_job(meta: JobMetadata) -> Self {
+        Self {
+            trace_ref: meta.trace_ref,
+        }
+    }
+}
+
 /// The logical target scope requested by a publication command.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -19,6 +19,7 @@ pub use ports::{
 };
 pub use services::{
     DeliveryProgressionItemResult, DeliveryProgressionService, DeliveryProgressionServiceDeps,
-    DeliveryProgressionUseCase, PublicationAcceptanceService, PublicationAcceptanceServiceDeps,
-    PublicationAcceptanceUseCase,
+    DeliveryProgressionUseCase, OutboxPublicationAcceptanceUseCase, OutboxRelayService,
+    OutboxRelayServiceDeps, OutboxRelayUseCase, PublicationAcceptanceService,
+    PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
 };
