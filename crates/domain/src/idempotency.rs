@@ -1,7 +1,9 @@
 //! Idempotency and request-digest domain objects.
 
 use bus_contracts::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
-use bus_contracts::events::CommittedOutboxFactInput;
+use bus_contracts::events::{
+    BackendDeliverySignalInput, CommittedOutboxFactInput, DeliveryTimeoutSignalInput,
+};
 use bus_contracts::metadata::{
     FeedbackId, IdempotencyKey, PublicationId, Timestamp, TraceContextRef,
 };
@@ -26,6 +28,10 @@ pub enum IdempotencyAction {
     RecordDeliveryFeedback,
     /// The committed outbox fact consumer.
     ConsumeCommittedOutboxFact,
+    /// The backend delivery signal consumer.
+    ConsumeBackendDeliverySignal,
+    /// The timeout signal consumer.
+    ConsumeTimeoutSignal,
 }
 
 /// A stable idempotency scope.
@@ -73,6 +79,32 @@ impl IdempotencyScope {
             )),
         }
     }
+
+    /// Builds the event scope for `ConsumeBackendDeliverySignal`.
+    pub fn for_backend_signal(input: &BackendDeliverySignalInput) -> Self {
+        Self {
+            entry_kind: IdempotencyEntryKind::Event,
+            action: IdempotencyAction::ConsumeBackendDeliverySignal,
+            boundary_ref: Some(format!(
+                "{}::{}",
+                input.source_ref.as_str(),
+                input.event_id.as_str()
+            )),
+        }
+    }
+
+    /// Builds the event scope for `ConsumeTimeoutSignal`.
+    pub fn for_timeout_signal(input: &DeliveryTimeoutSignalInput) -> Self {
+        Self {
+            entry_kind: IdempotencyEntryKind::Event,
+            action: IdempotencyAction::ConsumeTimeoutSignal,
+            boundary_ref: Some(format!(
+                "{}::{}",
+                input.source_ref.as_str(),
+                input.event_id.as_str()
+            )),
+        }
+    }
 }
 
 /// The algorithm version used to derive a request digest.
@@ -110,6 +142,22 @@ impl RequestDigest {
 
     /// Computes the request digest for `ConsumeCommittedOutboxFact`.
     pub fn from_outbox_fact_input(input: &CommittedOutboxFactInput) -> Result<Self, DomainError> {
+        let payload = serde_json::to_vec(input).map_err(|_| DomainError::InvalidRequestDigest)?;
+        Ok(Self::from_canonical_payload(payload))
+    }
+
+    /// Computes the request digest for `ConsumeBackendDeliverySignal`.
+    pub fn from_backend_signal_input(
+        input: &BackendDeliverySignalInput,
+    ) -> Result<Self, DomainError> {
+        let payload = serde_json::to_vec(input).map_err(|_| DomainError::InvalidRequestDigest)?;
+        Ok(Self::from_canonical_payload(payload))
+    }
+
+    /// Computes the request digest for `ConsumeTimeoutSignal`.
+    pub fn from_timeout_signal_input(
+        input: &DeliveryTimeoutSignalInput,
+    ) -> Result<Self, DomainError> {
         let payload = serde_json::to_vec(input).map_err(|_| DomainError::InvalidRequestDigest)?;
         Ok(Self::from_canonical_payload(payload))
     }
@@ -208,9 +256,11 @@ pub struct IdempotencyConflict {
 
 #[cfg(test)]
 mod tests {
+    use bus_contracts::metadata::DeliveryAttemptId;
+
     use bus_contracts::fixtures::{
-        DeliveryFixtureBuilder, FeedbackFixtureBuilder, OutboxFixtureBuilder,
-        PublicationFixtureBuilder, TestRunBuilder,
+        BackendFixtureBuilder, DeliveryFixtureBuilder, FeedbackFixtureBuilder,
+        OutboxFixtureBuilder, PublicationFixtureBuilder, TestRunBuilder,
     };
 
     use super::*;
@@ -278,6 +328,73 @@ mod tests {
         assert_eq!(
             scope.boundary_ref,
             Some(command.delivery_id.as_str().to_owned())
+        );
+        assert_ne!(first_digest, second_digest);
+    }
+
+    #[test]
+    fn backend_signal_scope_and_digest_follow_event_identity() {
+        let run = TestRunBuilder::new("idem-004").build();
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let feedback_builder = FeedbackFixtureBuilder::new(run.clone());
+        let signal = feedback_builder.delivered_backend_signal(
+            delivery_builder.delivery_id(),
+            DeliveryAttemptId::new("attempt_idem_004"),
+            backend_builder.in_memory_capability(),
+        );
+
+        let scope = IdempotencyScope::for_backend_signal(&signal);
+        let first_digest =
+            RequestDigest::from_backend_signal_input(&signal).expect("digest should be computed");
+        let mut changed = signal.clone();
+        changed.backend_result_ref = "backend_result_changed".into();
+        let second_digest =
+            RequestDigest::from_backend_signal_input(&changed).expect("digest should be computed");
+
+        assert_eq!(scope.entry_kind, IdempotencyEntryKind::Event);
+        assert_eq!(
+            scope.action,
+            IdempotencyAction::ConsumeBackendDeliverySignal
+        );
+        assert_eq!(
+            scope.boundary_ref,
+            Some(format!(
+                "{}::{}",
+                signal.source_ref.as_str(),
+                signal.event_id.as_str()
+            ))
+        );
+        assert_ne!(first_digest, second_digest);
+    }
+
+    #[test]
+    fn timeout_signal_scope_and_digest_follow_event_identity() {
+        let run = TestRunBuilder::new("idem-005").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let feedback_builder = FeedbackFixtureBuilder::new(run.clone());
+        let signal = feedback_builder.timeout_signal(
+            delivery_builder.delivery_id(),
+            DeliveryAttemptId::new("attempt_idem_005"),
+        );
+
+        let scope = IdempotencyScope::for_timeout_signal(&signal);
+        let first_digest =
+            RequestDigest::from_timeout_signal_input(&signal).expect("digest should be computed");
+        let mut changed = signal.clone();
+        changed.occurred_at = "2026-05-30T00:00:21Z".into();
+        let second_digest =
+            RequestDigest::from_timeout_signal_input(&changed).expect("digest should be computed");
+
+        assert_eq!(scope.entry_kind, IdempotencyEntryKind::Event);
+        assert_eq!(scope.action, IdempotencyAction::ConsumeTimeoutSignal);
+        assert_eq!(
+            scope.boundary_ref,
+            Some(format!(
+                "{}::{}",
+                signal.source_ref.as_str(),
+                signal.event_id.as_str()
+            ))
         );
         assert_ne!(first_digest, second_digest);
     }

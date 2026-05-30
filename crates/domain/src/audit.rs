@@ -39,6 +39,10 @@ pub enum AuditAction {
     DeliveryFailed(FailureReason),
     /// Feedback was recorded for a delivery.
     FeedbackRecorded(FeedbackStatus),
+    /// A backend signal was ignored because no committed delivery truth matched it.
+    BackendSignalIgnored,
+    /// A timeout signal was ignored because no committed delivery truth matched it.
+    TimeoutSignalIgnored,
     /// A request reused an idempotency key with a different digest.
     IdempotencyConflict,
 }

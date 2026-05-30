@@ -18,4 +18,5 @@ bus-application.workspace = true
 bus-contracts.workspace = true
 
 [dev-dependencies]
+bus-domain = { path = "../domain" }
 bus-infra = { path = "../infra" }

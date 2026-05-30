@@ -18,9 +18,9 @@ pub use ports::{
     TransportBackendPort, UnitOfWork, UnitOfWorkHandle, UnitOfWorkPurpose,
 };
 pub use services::{
-    DeliveryFeedbackUseCase, DeliveryProgressionItemResult, DeliveryProgressionService,
-    DeliveryProgressionServiceDeps, DeliveryProgressionUseCase, FeedbackRecordingService,
-    FeedbackRecordingServiceDeps, OutboxPublicationAcceptanceUseCase, OutboxRelayService,
-    OutboxRelayServiceDeps, OutboxRelayUseCase, PublicationAcceptanceService,
-    PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
+    BackendSignalUseCase, DeliveryFeedbackUseCase, DeliveryProgressionItemResult,
+    DeliveryProgressionService, DeliveryProgressionServiceDeps, DeliveryProgressionUseCase,
+    FeedbackRecordingService, FeedbackRecordingServiceDeps, OutboxPublicationAcceptanceUseCase,
+    OutboxRelayService, OutboxRelayServiceDeps, OutboxRelayUseCase, PublicationAcceptanceService,
+    PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase, TimeoutSignalUseCase,
 };

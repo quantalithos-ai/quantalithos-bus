@@ -10,7 +10,8 @@ pub use delivery::{
     DeliveryProgressionUseCase,
 };
 pub use feedback::{
-    DeliveryFeedbackUseCase, FeedbackRecordingService, FeedbackRecordingServiceDeps,
+    BackendSignalUseCase, DeliveryFeedbackUseCase, FeedbackRecordingService,
+    FeedbackRecordingServiceDeps, TimeoutSignalUseCase,
 };
 pub use outbox::{OutboxRelayService, OutboxRelayServiceDeps, OutboxRelayUseCase};
 pub use publication::{

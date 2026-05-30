@@ -2,8 +2,9 @@
 
 use bus_contracts::commands::RecordDeliveryFeedbackCommand;
 use bus_contracts::metadata::{
-    ActorContext, AuditRef, DeliveryAttemptId, DeliveryId, DeliveryStatus, ExternalFeedbackRef,
-    FailureReason, FeedbackId, FeedbackKind, FeedbackReason, FeedbackStatus, Timestamp, Version,
+    ActorContext, AuditRef, BackendResultRef, BackendStatus, DeliveryAttemptId, DeliveryId,
+    DeliveryStatus, ExternalFeedbackRef, FailureReason, FeedbackId, FeedbackKind, FeedbackReason,
+    FeedbackStatus, TimeoutReason, Timestamp, Version,
 };
 
 use crate::errors::DomainError;
@@ -34,6 +35,40 @@ impl FeedbackSource {
             attempt_id,
             external_feedback_ref,
         })
+    }
+
+    /// Builds a stable feedback source from one backend signal.
+    pub fn from_backend_signal(
+        attempt_id: DeliveryAttemptId,
+        backend_status: BackendStatus,
+        backend_result_ref: BackendResultRef,
+    ) -> Result<Self, DomainError> {
+        let attempt_ref = attempt_id.as_str().to_owned();
+        Self::new(
+            attempt_id,
+            ExternalFeedbackRef::new(format!(
+                "backend_signal:{}:{}:{}",
+                attempt_ref,
+                backend_status.as_str(),
+                backend_result_ref.as_str()
+            )),
+        )
+    }
+
+    /// Builds a stable feedback source from one timeout signal.
+    pub fn from_timeout_signal(
+        attempt_id: DeliveryAttemptId,
+        timeout_reason: TimeoutReason,
+    ) -> Result<Self, DomainError> {
+        let attempt_ref = attempt_id.as_str().to_owned();
+        Self::new(
+            attempt_id,
+            ExternalFeedbackRef::new(format!(
+                "timeout_signal:{}:{}",
+                attempt_ref,
+                timeout_reason.as_str()
+            )),
+        )
     }
 }
 
@@ -114,6 +149,44 @@ impl FeedbackResult {
             delivery_id,
             FeedbackStatus::Fail,
             Some(reason),
+            actor,
+            observed_at,
+            source,
+        )
+    }
+
+    /// Builds a feedback result from one normalized backend signal.
+    pub fn from_backend_signal(
+        delivery_id: DeliveryId,
+        source: FeedbackSource,
+        backend_status: BackendStatus,
+        actor: ActorContext,
+        observed_at: Timestamp,
+    ) -> Result<Self, DomainError> {
+        match backend_status {
+            BackendStatus::Delivered => Self::ack(delivery_id, source, None, actor, observed_at),
+            BackendStatus::Failed => Self::fail(
+                delivery_id,
+                source,
+                FeedbackReason::new("backend_failed"),
+                actor,
+                observed_at,
+            ),
+        }
+    }
+
+    /// Creates a timeout feedback result from one timeout signal.
+    pub fn timeout(
+        delivery_id: DeliveryId,
+        source: FeedbackSource,
+        reason: TimeoutReason,
+        actor: ActorContext,
+        observed_at: Timestamp,
+    ) -> Result<Self, DomainError> {
+        Self::build(
+            delivery_id,
+            FeedbackStatus::Timeout,
+            Some(FeedbackReason::new(reason.as_str())),
             actor,
             observed_at,
             source,
@@ -210,7 +283,7 @@ impl FeedbackResult {
                 .clone()
                 .map(|reason| FailureReason::new(reason.as_str()))
                 .unwrap_or_else(|| FailureReason::new("feedback_failed")),
-            FeedbackStatus::Timeout => FailureReason::new("delivery_timeout"),
+            FeedbackStatus::Timeout => FailureReason::delivery_timeout(),
             FeedbackStatus::Ack | FeedbackStatus::Duplicate => {
                 FailureReason::new("feedback_not_failure")
             }
@@ -227,8 +300,10 @@ fn sanitize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use bus_contracts::fixtures::{DeliveryFixtureBuilder, FeedbackFixtureBuilder, TestRunBuilder};
-    use bus_contracts::metadata::{FeedbackStatus, Timestamp};
+    use bus_contracts::fixtures::{
+        BackendFixtureBuilder, DeliveryFixtureBuilder, FeedbackFixtureBuilder, TestRunBuilder,
+    };
+    use bus_contracts::metadata::{BackendStatus, FeedbackStatus, TimeoutReason, Timestamp};
 
     use super::*;
 
@@ -289,5 +364,62 @@ mod tests {
             run.metadata.request.requested_at,
             Timestamp::new("2026-05-30T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn from_backend_signal_creates_ack_feedback_result() {
+        let run = TestRunBuilder::new("feedback-domain-004").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let source = FeedbackSource::from_backend_signal(
+            DeliveryAttemptId::new("attempt_feedback_domain_004"),
+            BackendStatus::Delivered,
+            backend_builder
+                .in_memory_capability()
+                .capability_id
+                .as_str()
+                .to_owned()
+                .into(),
+        )
+        .expect("backend signal source should be valid");
+
+        let feedback = FeedbackResult::from_backend_signal(
+            delivery_builder.delivery_id(),
+            source,
+            BackendStatus::Delivered,
+            run.actor,
+            Timestamp::new("2026-05-30T00:00:03Z"),
+        )
+        .expect("backend delivered signal should map");
+
+        assert_eq!(feedback.status, FeedbackStatus::Ack);
+        assert!(feedback.reason.is_none());
+    }
+
+    #[test]
+    fn timeout_feedback_uses_timeout_status_and_reason() {
+        let run = TestRunBuilder::new("feedback-domain-005").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let source = FeedbackSource::from_timeout_signal(
+            DeliveryAttemptId::new("attempt_feedback_domain_005"),
+            TimeoutReason::DispatchTimeout,
+        )
+        .expect("timeout source should be valid");
+
+        let feedback = FeedbackResult::timeout(
+            delivery_builder.delivery_id(),
+            source,
+            TimeoutReason::DispatchTimeout,
+            run.actor,
+            Timestamp::new("2026-05-30T00:00:04Z"),
+        )
+        .expect("timeout feedback should map");
+
+        assert_eq!(feedback.status, FeedbackStatus::Timeout);
+        assert_eq!(
+            feedback.reason,
+            Some(FeedbackReason::new("dispatch_timeout"))
+        );
+        assert_eq!(feedback.failure_reason(), FailureReason::delivery_timeout());
     }
 }

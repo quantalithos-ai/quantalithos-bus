@@ -3,9 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{
-    CommittedOutboxFactRef, CoreEventEnvelopeRef, CoreEventRef, DeliveryMode, EventId,
+    BackendCapabilityRef, BackendResultRef, BackendStatus, CommittedOutboxFactRef,
+    CoreEventEnvelopeRef, CoreEventRef, DeliveryAttemptId, DeliveryId, DeliveryMode, EventId,
     EventSourceRef, IdempotencyKey, OutboxCursor, PayloadDigest, PayloadKind, PayloadRef,
-    SourceRecordRef, SourceSystem, TargetScope,
+    SourceRecordRef, SourceSystem, TargetScope, TimeoutReason, Timestamp,
 };
 
 /// One committed outbox fact produced by the upstream source.
@@ -91,6 +92,48 @@ impl CommittedOutboxFactInput {
             idempotency_key: fact.idempotency_key,
         }
     }
+}
+
+/// One backend delivery signal received from a transport adapter.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendDeliverySignalInput {
+    /// The stable inbound signal identifier.
+    pub event_id: EventId,
+    /// The stable transport-adapter source reference.
+    pub source_ref: EventSourceRef,
+    /// The target delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The target delivery attempt identifier.
+    pub attempt_id: DeliveryAttemptId,
+    /// The backend capability that produced the signal.
+    pub backend_capability_ref: BackendCapabilityRef,
+    /// The raw backend status summary.
+    pub backend_status: BackendStatus,
+    /// The backend result reference without private response body.
+    pub backend_result_ref: BackendResultRef,
+    /// The signal idempotency key.
+    pub idempotency_key: IdempotencyKey,
+}
+
+/// One timeout signal received from a scheduler or clock source.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeliveryTimeoutSignalInput {
+    /// The stable inbound signal identifier.
+    pub event_id: EventId,
+    /// The stable scheduler or clock source reference.
+    pub source_ref: EventSourceRef,
+    /// The target delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The target delivery attempt identifier.
+    pub attempt_id: DeliveryAttemptId,
+    /// The normalized timeout reason.
+    pub timeout_reason: TimeoutReason,
+    /// The externally observed timeout timestamp.
+    pub occurred_at: Timestamp,
+    /// The signal idempotency key.
+    pub idempotency_key: IdempotencyKey,
 }
 
 /// One page of committed outbox facts returned by a source adapter.

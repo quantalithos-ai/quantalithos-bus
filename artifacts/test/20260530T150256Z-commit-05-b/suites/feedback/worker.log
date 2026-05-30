@@ -1,0 +1,28 @@
+   Compiling bus-worker v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/worker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (target/debug/deps/bus_worker-97d0ff2e420e06eb)
+
+running 8 tests
+test tests::backend_signal_consumer_rejects_private_body_like_result_reference ... ok
+test tests::backend_signal_consumer_ignores_unknown_delivery_without_feedback_truth ... ok
+test tests::outbox_consumer_rejects_missing_core_event_ref ... ok
+test tests::outbox_consumer_accepts_committed_fact ... ok
+test tests::backend_signal_consumer_records_delivered_signal ... ok
+test tests::timeout_signal_consumer_records_timeout_feedback_and_duplicate ... ok
+test tests::outbox_consumer_returns_duplicate_for_replayed_fact ... ok
+test tests::backend_signal_consumer_returns_duplicate_for_replayed_signal ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bus_worker.rs (target/debug/deps/bus_worker-cbd2ce528a3c58bf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_worker
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -116,6 +116,27 @@ impl DeliveryRecord {
         Ok(())
     }
 
+    /// Finishes the current delivery attempt using a normalized backend result.
+    pub fn finish_attempt(
+        &mut self,
+        attempt_id: &DeliveryAttemptId,
+        result: BackendDeliveryResult,
+        occurred_at: Timestamp,
+    ) -> Result<DeliveryAttempt, DomainError> {
+        if self.last_attempt_ref != Some(DeliveryAttemptRef::new(attempt_id.as_str())) {
+            return Err(DomainError::AttemptRefMismatch);
+        }
+
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|candidate| candidate.attempt_id == *attempt_id)
+            .ok_or(DomainError::AttemptRefMismatch)?;
+        attempt.finish(result, occurred_at)?;
+
+        Ok(attempt.clone())
+    }
+
     /// Appends a delivery-history entry after a valid state transition.
     pub fn append_history(&mut self, entry: DeliveryHistoryEntry) -> Result<(), DomainError> {
         if entry.delivery_id != self.delivery_id {

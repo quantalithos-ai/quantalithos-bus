@@ -698,6 +698,28 @@ mod tests {
             ))
         }
 
+        async fn normalize_signal(
+            &self,
+            signal: bus_contracts::events::BackendDeliverySignalInput,
+        ) -> Result<bus_contracts::metadata::BackendDeliveryResult, crate::errors::TransportPortError>
+        {
+            if signal.backend_capability_ref != self.capability_ref {
+                return Err(crate::errors::TransportPortError::CapabilityMismatch);
+            }
+
+            let backend_ref = Some(bus_contracts::metadata::BackendDeliveryRef::new(
+                signal.backend_result_ref.as_str(),
+            ));
+            match signal.backend_status {
+                bus_contracts::metadata::BackendStatus::Delivered => Ok(
+                    bus_contracts::metadata::BackendDeliveryResult::delivered(backend_ref),
+                ),
+                bus_contracts::metadata::BackendStatus::Failed => Ok(
+                    bus_contracts::metadata::BackendDeliveryResult::failed(backend_ref),
+                ),
+            }
+        }
+
         async fn check_capability(
             &self,
             capability_ref: BackendCapabilityRef,

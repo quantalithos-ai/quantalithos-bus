@@ -3,7 +3,8 @@ use std::pin::pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use bus_application::{
-    DeliveryFeedbackUseCase, FeedbackRecordingService, FeedbackRecordingServiceDeps,
+    BackendSignalUseCase, DeliveryFeedbackUseCase, FeedbackRecordingService,
+    FeedbackRecordingServiceDeps, TimeoutSignalUseCase,
 };
 use bus_contracts::fixtures::{
     BackendFixtureBuilder, FeedbackFixtureBuilder, PublicationFixtureBuilder, TestRun,
@@ -20,7 +21,7 @@ use bus_domain::publication::{PublicationMaterial, TransportSemantic};
 use bus_infra::{
     DeterministicIdGenerator, FixedClockAdapter, InMemoryAuditTrailRepository,
     InMemoryDeliveryRepository, InMemoryFeedbackRepository, InMemoryIdempotencyRepository,
-    InMemoryUnitOfWork, SharedMemoryStore,
+    InMemoryTransportBackendAdapter, InMemoryUnitOfWork, SharedMemoryStore,
 };
 
 type FeedbackService = FeedbackRecordingService<
@@ -31,6 +32,7 @@ type FeedbackService = FeedbackRecordingService<
     InMemoryUnitOfWork,
     FixedClockAdapter,
     DeterministicIdGenerator,
+    InMemoryTransportBackendAdapter,
 >;
 
 struct Harness {
@@ -73,6 +75,7 @@ where
 
 fn build_harness(run: &TestRun) -> Harness {
     let store = SharedMemoryStore::new();
+    let backend_builder = BackendFixtureBuilder::new(run.clone());
     let delivery_repository = InMemoryDeliveryRepository::new(store.clone());
     let feedback_repository = InMemoryFeedbackRepository::new(store.clone());
     let idempotency_repository = InMemoryIdempotencyRepository::new(store.clone());
@@ -83,8 +86,11 @@ fn build_harness(run: &TestRun) -> Harness {
         idempotency_repository: idempotency_repository.clone(),
         audit_repository: audit_repository.clone(),
         unit_of_work: InMemoryUnitOfWork::new(store),
-        clock: FixedClockAdapter::new(run.metadata.request.requested_at.clone()),
+        clock: FixedClockAdapter::new(Timestamp::new("2026-05-30T00:00:10Z")),
         id_generator: DeterministicIdGenerator::new(),
+        transport_backend: InMemoryTransportBackendAdapter::new(
+            backend_builder.in_memory_capability(),
+        ),
     });
 
     Harness {
@@ -154,6 +160,53 @@ fn seed_delivered_delivery(
             Timestamp::new("2026-05-30T00:00:02Z"),
         ))
         .expect("delivered history should append");
+    repository
+        .seed_committed(delivery.clone())
+        .expect("delivery should seed");
+
+    delivery
+}
+
+fn seed_dispatching_delivery(
+    repository: &InMemoryDeliveryRepository,
+    run: &TestRun,
+) -> DeliveryRecord {
+    let publication_builder = PublicationFixtureBuilder::new(run.clone());
+    let backend_builder = BackendFixtureBuilder::new(run.clone());
+    let material = PublicationMaterial::from_accept_publication_command(
+        publication_builder.valid_material(),
+        run.actor.clone(),
+        run.metadata.clone(),
+    )
+    .expect("publication material should be valid");
+    let capability_ref = backend_builder.in_memory_capability();
+    let semantic = TransportSemantic::derive(
+        material,
+        capability_ref.clone(),
+        SubscriberScope {
+            project_id: format!("project_{}", run.run_id),
+            topic: format!("workitem.events.{}", run.run_id),
+        },
+    )
+    .expect("transport semantic should be derived");
+    let mut delivery = DeliveryRecord::schedule(
+        semantic,
+        SubscriberRef::new("subscriber_alpha"),
+        IdempotencyKey::new(format!("idem_delivery_dispatching_{}", run.run_id)),
+    )
+    .expect("delivery should schedule");
+    delivery
+        .start_attempt(capability_ref, Timestamp::new("2026-05-30T00:00:01Z"))
+        .expect("delivery should start");
+    delivery
+        .append_history(DeliveryHistoryEntry::transition(
+            delivery.delivery_id.clone(),
+            DeliveryStatus::Scheduled,
+            DeliveryStatus::Dispatching,
+            bus_contracts::metadata::HistoryReason::dispatching_started(),
+            Timestamp::new("2026-05-30T00:00:01Z"),
+        ))
+        .expect("dispatch history should append");
     repository
         .seed_committed(delivery.clone())
         .expect("delivery should seed");
@@ -330,4 +383,260 @@ fn record_feedback_rejects_unknown_delivery_without_orphan_feedback() {
 
     assert_eq!(error.code(), "not_found.delivery");
     assert!(harness.feedback_repository.committed_all().is_empty());
+}
+
+#[test]
+fn record_backend_signal_commits_feedback_history_and_idempotency_anchor() {
+    let run = TestRunBuilder::new("svc-fdb-005").build();
+    let harness = build_harness(&run);
+    let backend_builder = BackendFixtureBuilder::new(run.clone());
+    let delivery = seed_dispatching_delivery(&harness.delivery_repository, &run);
+    let builder = FeedbackFixtureBuilder::new(run.clone());
+    let signal = builder.delivered_backend_signal(
+        delivery.delivery_id.clone(),
+        delivery
+            .last_attempt_ref
+            .clone()
+            .expect("dispatching delivery should have attempt ref")
+            .as_str()
+            .into(),
+        backend_builder.in_memory_capability(),
+    );
+
+    let result = block_on(harness.service.record_backend_signal(
+        signal.clone(),
+        run.actor.clone(),
+        builder.event_metadata(),
+    ))
+    .expect("backend signal should record");
+
+    assert_eq!(
+        result.signal_status,
+        bus_contracts::receipts::BackendSignalStatus::Recorded
+    );
+
+    let feedback = harness
+        .feedback_repository
+        .committed(
+            result
+                .feedback_id
+                .as_ref()
+                .expect("recorded backend signal should expose feedback id"),
+        )
+        .expect("feedback should be committed");
+    assert_eq!(
+        feedback.status,
+        bus_contracts::metadata::FeedbackStatus::Ack
+    );
+
+    let committed = harness
+        .delivery_repository
+        .committed(&delivery.delivery_id)
+        .expect("delivery should be committed");
+    assert_eq!(committed.status, DeliveryStatus::Delivered);
+    assert_eq!(committed.history().len(), 2);
+    assert_eq!(
+        committed
+            .history()
+            .last()
+            .expect("history should exist")
+            .reason,
+        bus_contracts::metadata::HistoryReason::delivery_arrived()
+    );
+
+    let anchor = harness
+        .idempotency_repository
+        .committed_anchor(
+            &IdempotencyScope::for_backend_signal(&signal),
+            &signal.idempotency_key,
+        )
+        .expect("backend signal anchor should bind");
+    assert_eq!(
+        anchor.bound_record_ref,
+        RecordRef::Feedback(
+            result
+                .feedback_id
+                .clone()
+                .expect("recorded backend signal should bind feedback")
+        )
+    );
+
+    let audits = harness.audit_repository.committed_entries();
+    assert_eq!(audits.len(), 1);
+    assert_eq!(
+        audits[0].action,
+        AuditAction::FeedbackRecorded(bus_contracts::metadata::FeedbackStatus::Ack)
+    );
+}
+
+#[test]
+fn record_backend_signal_same_key_same_digest_returns_existing_result() {
+    let run = TestRunBuilder::new("svc-fdb-006").build();
+    let harness = build_harness(&run);
+    let backend_builder = BackendFixtureBuilder::new(run.clone());
+    let delivery = seed_dispatching_delivery(&harness.delivery_repository, &run);
+    let builder = FeedbackFixtureBuilder::new(run.clone());
+    let signal = builder.delivered_backend_signal(
+        delivery.delivery_id.clone(),
+        delivery
+            .last_attempt_ref
+            .clone()
+            .expect("attempt ref should exist")
+            .as_str()
+            .into(),
+        backend_builder.in_memory_capability(),
+    );
+
+    let first = block_on(harness.service.record_backend_signal(
+        signal.clone(),
+        run.actor.clone(),
+        builder.event_metadata(),
+    ))
+    .expect("first backend signal should commit");
+    let second = block_on(harness.service.record_backend_signal(
+        signal,
+        run.actor.clone(),
+        builder.event_metadata(),
+    ))
+    .expect("duplicate backend signal should return existing result");
+
+    assert_eq!(
+        second.signal_status,
+        bus_contracts::receipts::BackendSignalStatus::Duplicate
+    );
+    assert_eq!(first.feedback_id, second.feedback_id);
+    assert_eq!(harness.feedback_repository.committed_all().len(), 1);
+}
+
+#[test]
+fn record_timeout_signal_commits_failure_feedback_history_and_candidate() {
+    let run = TestRunBuilder::new("svc-fdb-007").build();
+    let harness = build_harness(&run);
+    let delivery = seed_dispatching_delivery(&harness.delivery_repository, &run);
+    let builder = FeedbackFixtureBuilder::new(run.clone());
+    let signal = builder.timeout_signal(
+        delivery.delivery_id.clone(),
+        delivery
+            .last_attempt_ref
+            .clone()
+            .expect("attempt ref should exist")
+            .as_str()
+            .into(),
+    );
+
+    let result = block_on(harness.service.record_timeout(
+        signal.clone(),
+        run.actor.clone(),
+        builder.event_metadata(),
+    ))
+    .expect("timeout signal should record");
+
+    assert_eq!(
+        result.feedback_status,
+        bus_contracts::receipts::TimeoutRecordStatus::TimeoutRecorded
+    );
+    assert!(result.recovery_candidate);
+
+    let feedback = harness
+        .feedback_repository
+        .committed(
+            result
+                .feedback_id
+                .as_ref()
+                .expect("timeout signal should expose feedback id"),
+        )
+        .expect("timeout feedback should be committed");
+    assert_eq!(
+        feedback.status,
+        bus_contracts::metadata::FeedbackStatus::Timeout
+    );
+
+    let committed = harness
+        .delivery_repository
+        .committed(&delivery.delivery_id)
+        .expect("delivery should be committed");
+    assert_eq!(committed.status, DeliveryStatus::Failed);
+    assert!(
+        committed
+            .attempts()
+            .first()
+            .expect("attempt should exist")
+            .is_finished()
+    );
+    assert_eq!(
+        committed
+            .history()
+            .last()
+            .expect("history should exist")
+            .reason,
+        bus_contracts::metadata::HistoryReason::feedback_timeout()
+    );
+
+    let anchor = harness
+        .idempotency_repository
+        .committed_anchor(
+            &IdempotencyScope::for_timeout_signal(&signal),
+            &signal.idempotency_key,
+        )
+        .expect("timeout anchor should bind");
+    assert_eq!(
+        anchor.bound_record_ref,
+        RecordRef::Feedback(
+            result
+                .feedback_id
+                .clone()
+                .expect("timeout signal should bind feedback")
+        )
+    );
+}
+
+#[test]
+fn record_feedback_conflicts_after_timeout_signal_changes_delivery_state() {
+    let run = TestRunBuilder::new("svc-fdb-008").build();
+    let harness = build_harness(&run);
+    let delivery = seed_dispatching_delivery(&harness.delivery_repository, &run);
+    let builder = FeedbackFixtureBuilder::new(run.clone());
+    let timeout = builder.timeout_signal(
+        delivery.delivery_id.clone(),
+        delivery
+            .last_attempt_ref
+            .clone()
+            .expect("attempt ref should exist")
+            .as_str()
+            .into(),
+    );
+
+    block_on(
+        harness
+            .service
+            .record_timeout(timeout, run.actor.clone(), builder.event_metadata()),
+    )
+    .expect("timeout signal should commit first");
+
+    let ack = builder.ack_command(
+        delivery.delivery_id.clone(),
+        delivery
+            .last_attempt_ref
+            .clone()
+            .expect("attempt ref should exist")
+            .as_str()
+            .into(),
+    );
+    let error = block_on(
+        harness
+            .service
+            .record(ack, run.actor.clone(), run.metadata.clone()),
+    )
+    .expect_err("ack feedback should conflict after timeout");
+
+    assert_eq!(error.code(), "conflict.delivery_state");
+    assert_eq!(harness.feedback_repository.committed_all().len(), 1);
+    assert_eq!(
+        harness
+            .delivery_repository
+            .committed(&delivery.delivery_id)
+            .expect("delivery should remain committed")
+            .status,
+        DeliveryStatus::Failed
+    );
 }

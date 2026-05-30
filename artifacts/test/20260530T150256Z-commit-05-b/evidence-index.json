@@ -1,0 +1,14 @@
+{
+  "run_id": "20260530T150256Z-commit-05-b",
+  "suite": "feedback",
+  "artifacts": [
+    "artifacts/test/20260530T150256Z-commit-05-b/meta/context.json",
+    "artifacts/test/20260530T150256Z-commit-05-b/suites/feedback/contracts.log",
+    "artifacts/test/20260530T150256Z-commit-05-b/suites/feedback/domain.log",
+    "artifacts/test/20260530T150256Z-commit-05-b/suites/feedback/application.log",
+    "artifacts/test/20260530T150256Z-commit-05-b/suites/feedback/worker.log",
+    "artifacts/test/20260530T150256Z-commit-05-b/suites/feedback/workspace.log",
+    "artifacts/test/20260530T150256Z-commit-05-b/suites/feedback/cargo-check.log",
+    "reports/runs/20260530T150256Z-commit-05-b/evidence/EV-BUS-FDB.md"
+  ]
+}

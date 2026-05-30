@@ -1,22 +1,28 @@
 //! Reusable fixture builders for contract and domain tests.
 
 use crate::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
-use crate::events::{CommittedOutboxFact, CommittedOutboxFactInput, CommittedOutboxFactPage};
+use crate::events::{
+    BackendDeliverySignalInput, CommittedOutboxFact, CommittedOutboxFactInput,
+    CommittedOutboxFactPage, DeliveryTimeoutSignalInput,
+};
 use crate::jobs::{
     DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
 };
 use crate::metadata::{
     ActorContext, ActorKind, ActorRef, BackendCapabilityRef, BackendId, BackendKind,
-    BackendProfileRef, CapabilityVersion, CommandMetadata, CommittedOutboxFactRef,
-    ConsistencyMarker, ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef, DeliveryAttemptId,
-    DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId, EventMetadata,
-    EventSourceRef, ExternalFeedbackRef, FeedbackId, FeedbackKind, FeedbackReason,
+    BackendProfileRef, BackendResultRef, BackendStatus, CapabilityVersion, CommandMetadata,
+    CommittedOutboxFactRef, ConsistencyMarker, ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef,
+    DeliveryAttemptId, DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId,
+    EventMetadata, EventSourceRef, ExternalFeedbackRef, FeedbackId, FeedbackKind, FeedbackReason,
     FeedbackRecordStatus, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor, PayloadDigest,
     PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata, RequestOrigin,
-    SourceRecordRef, SourceSystem, TargetScope, Timestamp, TraceId,
+    SourceRecordRef, SourceSystem, TargetScope, TimeoutReason, Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
-use crate::receipts::{FeedbackRecordResult, OutboxRelayResult, OutboxRelayStatus};
+use crate::receipts::{
+    BackendSignalNormalizedResult, BackendSignalResult, BackendSignalStatus, FeedbackRecordResult,
+    OutboxRelayResult, OutboxRelayStatus, TimeoutRecordResult, TimeoutRecordStatus,
+};
 use crate::views::DeliveryStatusView;
 
 /// The shared baseline data for a deterministic test run.
@@ -403,6 +409,71 @@ impl FeedbackFixtureBuilder {
         }
     }
 
+    /// Returns deterministic consumer metadata for feedback signal tests.
+    pub fn event_metadata(&self) -> EventMetadata {
+        EventMetadata {
+            trace_ref: TraceId::new(format!("trace-event-{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a delivered backend signal for the provided attempt.
+    pub fn delivered_backend_signal(
+        &self,
+        delivery_id: DeliveryId,
+        attempt_id: DeliveryAttemptId,
+        backend_capability_ref: BackendCapabilityRef,
+    ) -> BackendDeliverySignalInput {
+        BackendDeliverySignalInput {
+            event_id: EventId::new(format!("event_backend_signal_{}", self.run.run_id)),
+            source_ref: EventSourceRef::new(format!("backend_adapter_{}", self.run.run_id)),
+            delivery_id,
+            attempt_id,
+            backend_capability_ref,
+            backend_status: BackendStatus::Delivered,
+            backend_result_ref: BackendResultRef::new(format!(
+                "backend_result_{}",
+                self.run.run_id
+            )),
+            idempotency_key: core_contracts::metadata::IdempotencyKey::new(format!(
+                "idem_backend_signal_{}",
+                self.run.run_id
+            )),
+        }
+    }
+
+    /// Returns a failed backend signal for the provided attempt.
+    pub fn failed_backend_signal(
+        &self,
+        delivery_id: DeliveryId,
+        attempt_id: DeliveryAttemptId,
+        backend_capability_ref: BackendCapabilityRef,
+    ) -> BackendDeliverySignalInput {
+        BackendDeliverySignalInput {
+            backend_status: BackendStatus::Failed,
+            ..self.delivered_backend_signal(delivery_id, attempt_id, backend_capability_ref)
+        }
+    }
+
+    /// Returns a timeout signal for the provided attempt.
+    pub fn timeout_signal(
+        &self,
+        delivery_id: DeliveryId,
+        attempt_id: DeliveryAttemptId,
+    ) -> DeliveryTimeoutSignalInput {
+        DeliveryTimeoutSignalInput {
+            event_id: EventId::new(format!("event_timeout_signal_{}", self.run.run_id)),
+            source_ref: EventSourceRef::new(format!("scheduler_{}", self.run.run_id)),
+            delivery_id,
+            attempt_id,
+            timeout_reason: TimeoutReason::DispatchTimeout,
+            occurred_at: Timestamp::new("2026-05-30T00:00:20Z"),
+            idempotency_key: core_contracts::metadata::IdempotencyKey::new(format!(
+                "idem_timeout_signal_{}",
+                self.run.run_id
+            )),
+        }
+    }
+
     /// Returns a valid feedback-recording receipt DTO.
     pub fn feedback_record_result(
         &self,
@@ -417,6 +488,33 @@ impl FeedbackFixtureBuilder {
             audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
         }
     }
+
+    /// Returns a valid backend-signal receipt DTO.
+    pub fn backend_signal_result(
+        &self,
+        delivery_id: DeliveryId,
+        attempt_id: DeliveryAttemptId,
+    ) -> BackendSignalResult {
+        BackendSignalResult {
+            delivery_id,
+            attempt_id,
+            signal_status: BackendSignalStatus::Recorded,
+            normalized_result: Some(BackendSignalNormalizedResult::Ack),
+            feedback_id: Some(FeedbackId::new(format!("feedback_{}", self.run.run_id))),
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a valid timeout-signal receipt DTO.
+    pub fn timeout_record_result(&self, delivery_id: DeliveryId) -> TimeoutRecordResult {
+        TimeoutRecordResult {
+            delivery_id,
+            feedback_id: Some(FeedbackId::new(format!("feedback_{}", self.run.run_id))),
+            feedback_status: TimeoutRecordStatus::TimeoutRecorded,
+            recovery_candidate: true,
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -428,7 +526,9 @@ mod tests {
     use crate::metadata::{
         AuditRef, DeliveryStatus, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
     };
-    use crate::receipts::{FeedbackRecordResult, PublicationAcceptanceResult};
+    use crate::receipts::{
+        BackendSignalResult, FeedbackRecordResult, PublicationAcceptanceResult, TimeoutRecordResult,
+    };
 
     fn roundtrip<T>(value: &T)
     where
@@ -504,6 +604,58 @@ mod tests {
             delivery_status: DeliveryStatus::Completed,
             audit_ref: AuditRef::new("audit-002"),
         });
+    }
+
+    #[test]
+    fn backend_delivery_signal_input_roundtrip() {
+        let run = TestRunBuilder::new("sig-001").build();
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = FeedbackFixtureBuilder::new(run);
+        let input = builder.delivered_backend_signal(
+            delivery_builder.delivery_id(),
+            DeliveryAttemptId::new("attempt_sig_001"),
+            backend_builder.in_memory_capability(),
+        );
+
+        roundtrip(&input);
+    }
+
+    #[test]
+    fn delivery_timeout_signal_input_roundtrip() {
+        let run = TestRunBuilder::new("sig-002").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = FeedbackFixtureBuilder::new(run);
+        let input = builder.timeout_signal(
+            delivery_builder.delivery_id(),
+            DeliveryAttemptId::new("attempt_sig_002"),
+        );
+
+        roundtrip(&input);
+    }
+
+    #[test]
+    fn backend_signal_result_roundtrip() {
+        let run = TestRunBuilder::new("sig-003").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = FeedbackFixtureBuilder::new(run);
+        let receipt: BackendSignalResult = builder.backend_signal_result(
+            delivery_builder.delivery_id(),
+            DeliveryAttemptId::new("attempt_sig_003"),
+        );
+
+        roundtrip(&receipt);
+    }
+
+    #[test]
+    fn timeout_record_result_roundtrip() {
+        let run = TestRunBuilder::new("sig-004").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = FeedbackFixtureBuilder::new(run);
+        let receipt: TimeoutRecordResult =
+            builder.timeout_record_result(delivery_builder.delivery_id());
+
+        roundtrip(&receipt);
     }
 
     #[test]

@@ -8,9 +8,10 @@ use bus_application::{
     FeedbackRepository, IdempotencyRepository, PublicationRepository, RepositoryError,
     TransportBackendPort, TransportPortError, UnitOfWorkHandle,
 };
+use bus_contracts::events::BackendDeliverySignalInput;
 use bus_contracts::metadata::{
-    BackendCapabilityRef, BackendDeliveryRef, DeliveryId, DeliveryScanCursor, FeedbackId,
-    IdempotencyKey, PublicationId, Version,
+    BackendCapabilityRef, BackendDeliveryRef, BackendStatus, DeliveryId, DeliveryScanCursor,
+    FeedbackId, IdempotencyKey, PublicationId, Version,
 };
 use bus_domain::audit::BusAuditEntry;
 use bus_domain::backend::BackendCapabilityPolicy;
@@ -338,6 +339,28 @@ impl TransportBackendPort for InMemoryTransportBackendAdapter {
         ))
     }
 
+    async fn normalize_signal(
+        &self,
+        signal: BackendDeliverySignalInput,
+    ) -> Result<bus_contracts::metadata::BackendDeliveryResult, TransportPortError> {
+        if signal.backend_capability_ref != self.capability_ref {
+            return Err(TransportPortError::CapabilityMismatch);
+        }
+        if result_ref_looks_private(signal.backend_result_ref.as_str()) {
+            return Err(TransportPortError::PrivateBodyViolation);
+        }
+
+        let backend_ref = Some(BackendDeliveryRef::new(signal.backend_result_ref.as_str()));
+        match signal.backend_status {
+            BackendStatus::Delivered => Ok(
+                bus_contracts::metadata::BackendDeliveryResult::delivered(backend_ref),
+            ),
+            BackendStatus::Failed => Ok(bus_contracts::metadata::BackendDeliveryResult::failed(
+                backend_ref,
+            )),
+        }
+    }
+
     async fn check_capability(
         &self,
         capability_ref: BackendCapabilityRef,
@@ -354,4 +377,8 @@ impl TransportBackendPort for InMemoryTransportBackendAdapter {
                 .expect("backend availability lock poisoned"),
         })
     }
+}
+
+fn result_ref_looks_private(value: &str) -> bool {
+    value.contains('{') || value.contains('}') || value.contains('\n')
 }

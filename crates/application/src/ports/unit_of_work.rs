@@ -15,6 +15,10 @@ pub enum UnitOfWorkPurpose {
     RunDeliveryProgression,
     /// The delivery feedback write path.
     RecordDeliveryFeedback,
+    /// The backend delivery signal consumer write path.
+    ConsumeBackendDeliverySignal,
+    /// The timeout signal consumer write path.
+    ConsumeTimeoutSignal,
 }
 
 /// A rollback reason label.

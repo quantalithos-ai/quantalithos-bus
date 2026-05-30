@@ -1,5 +1,6 @@
 //! Transport backend port contracts.
 
+use bus_contracts::events::BackendDeliverySignalInput;
 use bus_contracts::metadata::BackendDeliveryResult;
 use bus_contracts::metadata::{
     BackendCapabilityRef, BackendId, JobMetadata, JobRunId, JobTriggerSource, TraceContextRef,
@@ -51,6 +52,12 @@ pub trait TransportBackendPort: Send + Sync {
         semantic: TransportSemantic,
         attempt: DeliveryAttempt,
         context: BackendDispatchContext,
+    ) -> Result<BackendDeliveryResult, TransportPortError>;
+
+    /// Normalizes one backend delivery signal into a bus-owned attempt result.
+    async fn normalize_signal(
+        &self,
+        signal: BackendDeliverySignalInput,
     ) -> Result<BackendDeliveryResult, TransportPortError>;
 
     /// Checks whether the backend capability is currently available.

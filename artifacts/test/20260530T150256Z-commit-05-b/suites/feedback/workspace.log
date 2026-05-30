@@ -1,0 +1,233 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_api-214bfa9e5e73692c)
+
+running 9 tests
+test tests::accept_publication_commits_truth_audit_and_idempotency_anchor ... ok
+test tests::accept_publication_boundary_violation_returns_422_and_commits_rejection ... ok
+test tests::accept_publication_rolls_back_staged_truth_when_audit_append_fails ... ok
+test tests::accept_publication_missing_core_event_ref_returns_validation_with_rejected_truth ... ok
+test tests::accept_publication_same_key_same_digest_returns_existing_result ... ok
+test tests::record_feedback_late_or_unknown_feedback_returns_not_found_or_conflict ... ok
+test tests::accept_publication_same_key_different_digest_returns_conflict ... ok
+test tests::record_feedback_returns_completed_result_and_commits_truth ... ok
+test tests::record_feedback_same_key_same_digest_returns_existing_result ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bus_api.rs (target/debug/deps/bus_api-652000814a84967f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/bus_application-76667766a0b6fcb2)
+
+running 4 tests
+test services::delivery::tests::progress_one_returns_manual_action_on_commit_uncertain ... ok
+test services::delivery::tests::progress_batch_marks_backend_unavailable_delivery_failed ... ok
+test services::delivery::tests::progress_batch_marks_capability_mismatch_failed_without_secret_leak ... ok
+test services::delivery::tests::progress_batch_delivers_scheduled_delivery_and_records_history ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/feedback.rs (target/debug/deps/feedback-07df37d5d1a5f321)
+
+running 8 tests
+test record_feedback_rejects_unknown_delivery_without_orphan_feedback ... ok
+test record_backend_signal_commits_feedback_history_and_idempotency_anchor ... ok
+test record_ack_feedback_commits_truth_history_and_idempotency_anchor ... ok
+test record_backend_signal_same_key_same_digest_returns_existing_result ... ok
+test record_feedback_same_key_different_digest_returns_conflict ... ok
+test record_feedback_conflicts_after_timeout_signal_changes_delivery_state ... ok
+test record_timeout_signal_commits_failure_feedback_history_and_candidate ... ok
+test record_feedback_same_key_same_digest_returns_existing_result ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/bus_contracts-a523fa032f3ceee8)
+
+running 26 tests
+test fixtures::tests::accept_publication_command_rejects_legacy_delivery_mode_value ... ok
+test fixtures::tests::accept_publication_command_rejects_payload_body_field ... ok
+test fixtures::tests::accept_publication_command_rejects_transport_semantic_field ... ok
+test fixtures::tests::accept_publication_command_requires_core_event_ref_field ... ok
+test fixtures::tests::committed_outbox_fact_rejects_payload_body_field ... ok
+test fixtures::tests::backend_delivery_signal_input_roundtrip ... ok
+test fixtures::tests::delivery_progression_result_roundtrip ... ok
+test fixtures::tests::backend_signal_result_roundtrip ... ok
+test fixtures::tests::delivery_status_view_roundtrip ... ok
+test fixtures::tests::backend_capability_fixture_roundtrip ... ok
+test fixtures::tests::accept_publication_command_roundtrip ... ok
+test fixtures::tests::event_metadata_roundtrip ... ok
+test fixtures::tests::delivery_timeout_signal_input_roundtrip ... ok
+test fixtures::tests::committed_outbox_fact_roundtrip ... ok
+test fixtures::tests::committed_outbox_fact_page_roundtrip ... ok
+test fixtures::tests::job_metadata_roundtrip ... ok
+test fixtures::tests::get_delivery_status_query_roundtrip ... ok
+test fixtures::tests::outbox_relay_job_result_roundtrip ... ok
+test fixtures::tests::committed_outbox_fact_input_roundtrip ... ok
+test fixtures::tests::feedback_record_result_roundtrip ... ok
+test fixtures::tests::outbox_relay_result_roundtrip ... ok
+test fixtures::tests::publication_acceptance_result_roundtrip ... ok
+test fixtures::tests::record_delivery_feedback_command_roundtrip ... ok
+test fixtures::tests::run_delivery_progression_job_roundtrip ... ok
+test fixtures::tests::run_outbox_relay_job_roundtrip ... ok
+test fixtures::tests::timeout_record_result_roundtrip ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/bus_domain-bca8efd304aeb827)
+
+running 35 tests
+test backend::tests::backend_capability_policy_rejects_mismatched_capability ... ok
+test backend::tests::backend_capability_policy_allows_in_memory_mapping ... ok
+test backend::tests::backend_capability_policy_rejects_private_backend_data ... ok
+test delivery::tests::delivery_attempt_rejects_finishing_twice ... ok
+test delivery::tests::delivery_lifecycle_requires_history_for_allowed_transition ... ok
+test delivery::tests::delivery_history_entry_describes_transition ... ok
+test delivery::tests::delivery_record_marks_failed_from_dispatching ... ok
+test delivery::tests::delivery_record_marks_completed_from_ack_feedback ... ok
+test delivery::tests::delivery_record_rejects_reopening_after_delivered ... ok
+test delivery::tests::delivery_record_rejects_completion_from_old_attempt_feedback ... ok
+test delivery::tests::delivery_record_rejects_skip_attempt_transition ... ok
+test delivery::tests::delivery_record_starts_attempt_and_marks_delivered ... ok
+test feedback::tests::feedback_result_rejects_blank_external_reference ... ok
+test delivery::tests::delivery_record_starts_scheduled ... ok
+test feedback::tests::from_backend_signal_creates_ack_feedback_result ... ok
+test feedback::tests::from_command_creates_ack_feedback_result ... ok
+test feedback::tests::from_command_creates_fail_feedback_result ... ok
+test feedback::tests::timeout_feedback_uses_timeout_status_and_reason ... ok
+test idempotency::tests::backend_signal_scope_and_digest_follow_event_identity ... ok
+test idempotency::tests::outbox_fact_scope_uses_source_and_event_identity ... ok
+test idempotency::tests::feedback_command_scope_and_digest_follow_delivery_identity ... ok
+test idempotency::tests::timeout_signal_scope_and_digest_follow_event_identity ... ok
+test publication::tests::payload_boundary_guard_rejects_inline_body_like_payload_reference ... ok
+test publication::tests::publication_acceptance_accepts_from_pending ... ok
+test idempotency::tests::outbox_fact_digest_changes_with_fact_content ... ok
+test publication::tests::publication_acceptance_blocks_terminal_rewrite_after_accept ... ok
+test publication::tests::publication_acceptance_blocks_terminal_rewrite_after_reject ... ok
+test publication::tests::publication_acceptance_can_start_pending_without_core_event_ref ... ok
+test publication::tests::publication_acceptance_rejects_from_pending ... ok
+test publication::tests::publication_acceptance_starts_pending ... ok
+test publication::tests::publication_material_from_command_preserves_reference_only_fields ... ok
+test publication::tests::publication_material_from_outbox_fact_preserves_envelope_and_delivery_inputs ... ok
+test publication::tests::transport_semantic_derives_from_accepted_material ... ok
+test publication::tests::transport_semantic_rejects_backend_private_leak ... ok
+test publication::tests::transport_semantic_rejects_scope_mismatch ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/bus_infra-7c92e6aa21bacddf)
+
+running 5 tests
+test source::tests::outbox_source_ack_failure_replays_fact_until_ack_succeeds ... ok
+test source::tests::outbox_source_acknowledges_fact_and_skips_it_on_later_polls ... ok
+test source::tests::outbox_source_fixture_rejects_duplicate_fact_ref ... ok
+test source::tests::outbox_source_rejects_unknown_cursor ... ok
+test source::tests::outbox_source_polls_committed_facts_with_cursor_progression ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/bus_jobs-53c10fca84b65a12)
+
+running 5 tests
+test tests::outbox_relay_job_runner_maps_source_unavailable_to_retryable_error ... ok
+test tests::outbox_relay_job_runner_continues_after_rejected_item ... ok
+test tests::outbox_relay_job_runner_replays_after_ack_failure_without_duplicate_truth ... ok
+test tests::outbox_relay_job_runner_accepts_committed_batch_and_advances_cursor ... ok
+test tests::delivery_progression_job_runner_isolates_success_and_failure_items ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/check_backend_capability.rs (target/debug/deps/check_backend_capability-064574a7cad1c5de)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/rebuild_projection.rs (target/debug/deps/rebuild_projection-8a8b6115f36b54cb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_delivery_progression.rs (target/debug/deps/run_delivery_progression-5eb0f94e39172873)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_outbox_relay.rs (target/debug/deps/run_outbox_relay-7fc58d7589c44155)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_retry_cycle.rs (target/debug/deps/run_retry_cycle-8a920c36a16cac71)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/bus_worker-97d0ff2e420e06eb)
+
+running 8 tests
+test tests::backend_signal_consumer_ignores_unknown_delivery_without_feedback_truth ... ok
+test tests::backend_signal_consumer_rejects_private_body_like_result_reference ... ok
+test tests::outbox_consumer_rejects_missing_core_event_ref ... ok
+test tests::backend_signal_consumer_returns_duplicate_for_replayed_signal ... ok
+test tests::outbox_consumer_accepts_committed_fact ... ok
+test tests::backend_signal_consumer_records_delivered_signal ... ok
+test tests::outbox_consumer_returns_duplicate_for_replayed_fact ... ok
+test tests::timeout_signal_consumer_records_timeout_feedback_and_duplicate ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bus_worker.rs (target/debug/deps/bus_worker-cbd2ce528a3c58bf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_application
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_contracts
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_domain
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_infra
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_jobs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests bus_worker
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -90,6 +90,10 @@ string_newtype!(
 );
 string_newtype!(BackendId, "A stable backend identifier.");
 string_newtype!(
+    BackendResultRef,
+    "A stable backend result reference without private response body."
+);
+string_newtype!(
     BackendProfileRef,
     "A backend profile reference without secrets."
 );
@@ -228,6 +232,11 @@ impl HistoryReason {
     pub fn feedback_fail() -> Self {
         Self::new("feedback_fail")
     }
+
+    /// Returns the stable reason for a timeout-driven failure transition.
+    pub fn feedback_timeout() -> Self {
+        Self::new("feedback_timeout")
+    }
 }
 
 impl FailureReason {
@@ -239,6 +248,11 @@ impl FailureReason {
     /// Returns the stable reason for a normalized backend dispatch failure.
     pub fn dispatch_failed() -> Self {
         Self::new("dispatch_failed")
+    }
+
+    /// Returns the stable reason for a timeout-driven delivery failure.
+    pub fn delivery_timeout() -> Self {
+        Self::new("delivery_timeout")
     }
 }
 
@@ -347,6 +361,26 @@ pub enum BackendKind {
     InMemory,
 }
 
+/// The raw backend status received from a backend signal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendStatus {
+    /// The backend reported a delivered handoff.
+    Delivered,
+    /// The backend reported a failed handoff.
+    Failed,
+}
+
+impl BackendStatus {
+    /// Returns the stable protocol value for the current raw backend status.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 /// The normalized backend dispatch status used by attempts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -355,6 +389,23 @@ pub enum BackendDeliveryStatus {
     Delivered,
     /// The backend reported that the delivery failed.
     Failed,
+}
+
+/// The normalized timeout reason accepted by timeout signals.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeoutReason {
+    /// The dispatch attempt exceeded its allowed processing window.
+    DispatchTimeout,
+}
+
+impl TimeoutReason {
+    /// Returns the stable protocol value for the current timeout reason.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DispatchTimeout => "dispatch_timeout",
+        }
+    }
 }
 
 /// The consistency marker returned by read-only delivery views.

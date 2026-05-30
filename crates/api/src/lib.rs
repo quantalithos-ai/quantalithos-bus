@@ -137,7 +137,8 @@ mod tests {
     use bus_infra::{
         DeterministicIdGenerator, FixedClockAdapter, InMemoryAuditTrailRepository,
         InMemoryDeliveryRepository, InMemoryFeedbackRepository, InMemoryIdempotencyRepository,
-        InMemoryPublicationRepository, InMemoryUnitOfWork, SharedMemoryStore,
+        InMemoryPublicationRepository, InMemoryTransportBackendAdapter, InMemoryUnitOfWork,
+        SharedMemoryStore,
     };
 
     use super::{BusCommandApi, DeliveryFeedbackApi};
@@ -159,6 +160,7 @@ mod tests {
         InMemoryUnitOfWork,
         FixedClockAdapter,
         DeterministicIdGenerator,
+        InMemoryTransportBackendAdapter,
     >;
 
     struct Harness {
@@ -230,6 +232,7 @@ mod tests {
 
     fn build_feedback_harness(run: &TestRun) -> FeedbackHarness {
         let store = SharedMemoryStore::new();
+        let backend_builder = BackendFixtureBuilder::new(run.clone());
         let delivery_repository = InMemoryDeliveryRepository::new(store.clone());
         let feedback_repository = InMemoryFeedbackRepository::new(store.clone());
         let idempotency_repository = InMemoryIdempotencyRepository::new(store.clone());
@@ -240,8 +243,11 @@ mod tests {
             idempotency_repository: idempotency_repository.clone(),
             audit_repository: audit_repository.clone(),
             unit_of_work: InMemoryUnitOfWork::new(store),
-            clock: FixedClockAdapter::new(run.metadata.request.requested_at.clone()),
+            clock: FixedClockAdapter::new(Timestamp::new("2026-05-30T00:00:10Z")),
             id_generator: DeterministicIdGenerator::new(),
+            transport_backend: InMemoryTransportBackendAdapter::new(
+                backend_builder.in_memory_capability(),
+            ),
         });
 
         FeedbackHarness {
