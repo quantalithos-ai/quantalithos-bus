@@ -8,6 +8,8 @@ version = "0.1.0"
 dependencies = [
  "bus-application",
  "bus-contracts",
+ "bus-domain",
+ "bus-infra",
 ]
 
 [[package]]
@@ -32,6 +34,7 @@ name = "bus-domain"
 version = "0.1.0"
 dependencies = [
  "bus-contracts",
+ "serde_json",
 ]
 
 [[package]]

@@ -10,6 +10,8 @@ use bus_contracts::metadata::PublicationAcceptanceStatus;
 pub enum DomainError {
     /// The publication material is missing a required reference or identifier.
     InvalidPublicationMaterial(&'static str),
+    /// The request digest could not be computed.
+    InvalidRequestDigest,
     /// The publication material violates the payload boundary.
     PayloadBoundaryViolation,
     /// The requested status transition is not allowed.
@@ -31,6 +33,7 @@ impl fmt::Display for DomainError {
             Self::InvalidPublicationMaterial(field) => {
                 write!(formatter, "invalid publication material: {field}")
             }
+            Self::InvalidRequestDigest => formatter.write_str("invalid request digest"),
             Self::PayloadBoundaryViolation => formatter.write_str("payload boundary violation"),
             Self::InvalidStateTransition { from, to } => {
                 write!(formatter, "invalid state transition: {from:?} -> {to:?}")

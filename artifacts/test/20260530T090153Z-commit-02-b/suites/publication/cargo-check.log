@@ -1,0 +1,7 @@
+    Blocking waiting for file lock on build directory
+    Checking bus-application v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/application)
+    Checking bus-jobs v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/jobs)
+    Checking bus-api v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/api)
+    Checking bus-worker v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/worker)
+    Checking bus-infra v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/infra)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.48s

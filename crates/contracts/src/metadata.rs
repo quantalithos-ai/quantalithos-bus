@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub use core_contracts::actor::{ActorContext, ActorKind, ActorRef, RequestOrigin};
 pub use core_contracts::metadata::{
-    CommandMetadata, IdempotencyKey, RequestId, RequestMetadata, Timestamp, TraceId,
+    CommandMetadata, IdempotencyKey, RequestId, RequestMetadata, Timestamp, TraceId, Version,
 };
 
 /// Reuses the shared core trace identifier as the bus trace reference.
