@@ -23,11 +23,16 @@ name = "bus-contracts"
 version = "0.1.0"
 dependencies = [
  "core-contracts",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "bus-domain"
 version = "0.1.0"
+dependencies = [
+ "bus-contracts",
+]
 
 [[package]]
 name = "bus-infra"

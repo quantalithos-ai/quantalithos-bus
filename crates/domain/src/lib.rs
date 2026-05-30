@@ -1,1 +1,4 @@
-//! Bus domain crate skeleton for the L0-bus workspace.
+//! Bus domain types for the L0-bus workspace.
+
+pub mod errors;
+pub mod publication;

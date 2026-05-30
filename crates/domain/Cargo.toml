@@ -8,3 +8,6 @@ rust-version.workspace = true
 [lib]
 name = "bus_domain"
 path = "src/lib.rs"
+
+[dependencies]
+bus-contracts.workspace = true

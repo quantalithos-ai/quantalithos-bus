@@ -21,3 +21,5 @@ bus-application = { path = "crates/application" }
 bus-contracts = { path = "crates/contracts" }
 bus-domain = { path = "crates/domain" }
 core-contracts = { path = "../quantalithos-core/crates/contracts" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

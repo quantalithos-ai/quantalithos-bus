@@ -11,3 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 core-contracts.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
