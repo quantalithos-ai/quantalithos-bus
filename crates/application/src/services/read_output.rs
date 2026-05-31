@@ -1,7 +1,8 @@
 //! Read-only query service for committed bus outputs.
 
 use bus_contracts::metadata::{
-    ActorContext, BackendCapabilityStatus, ConsistencyMarker, FailureKind, PageRequest, PageToken,
+    ActorContext, AuditRef, BackendCapabilityStatus, ConsistencyMarker, FailureKind, PageRequest,
+    PageToken, QueryMetadata,
 };
 use bus_contracts::queries::{
     GetBackendHealthViewQuery, GetBusAuditTrailQuery, GetDeliveryStatusQuery,
@@ -11,6 +12,10 @@ use bus_contracts::queries::{
 use bus_contracts::views::{
     BackendHealthView, BusAuditTrailView, DeliveryHistoryItemView, DeliveryHistoryPage,
     DeliveryStatusView, FailureSummaryView, PublicationAcceptanceView, TransportView,
+};
+use bus_domain::audit::{
+    AuditAction, PrivilegedAccessDecision, PrivilegedAccessRejectionReason, PrivilegedAccessScope,
+    SubjectRef,
 };
 use bus_domain::read_output::{ProjectionStatus, ReadOnlyOutputPolicy};
 
@@ -27,6 +32,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: GetPublicationAcceptanceQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<PublicationAcceptanceView, ApplicationError>;
 
     /// Loads one delivery-status view.
@@ -34,6 +40,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: GetDeliveryStatusQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<DeliveryStatusView, ApplicationError>;
 
     /// Loads one page of delivery-history items.
@@ -41,6 +48,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: ListDeliveryHistoryQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<DeliveryHistoryPage, ApplicationError>;
 
     /// Loads one transport-view projection.
@@ -48,6 +56,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: GetTransportViewQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<TransportView, ApplicationError>;
 
     /// Loads one failure-summary projection.
@@ -55,6 +64,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: GetFailureSummaryQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<FailureSummaryView, ApplicationError>;
 
     /// Loads one page of audit-trail items.
@@ -62,6 +72,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: GetBusAuditTrailQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<BusAuditTrailView, ApplicationError>;
 
     /// Loads one backend-health view.
@@ -69,6 +80,7 @@ pub trait ReadOutputUseCase: Send + Sync {
         &self,
         query: GetBackendHealthViewQuery,
         actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<BackendHealthView, ApplicationError>;
 }
 
@@ -146,6 +158,73 @@ where
             }
         }
     }
+
+    fn access_audit_ref(scope: PrivilegedAccessScope, meta: &QueryMetadata) -> AuditRef {
+        let scope_ref = match scope {
+            PrivilegedAccessScope::FailureSummary => "failure_summary",
+            PrivilegedAccessScope::BusAuditTrail => "bus_audit_trail",
+            PrivilegedAccessScope::ReplayPreparation => "replay_preparation",
+        };
+
+        AuditRef::new(format!(
+            "audit_access_{}_{}",
+            scope_ref,
+            meta.request.request_id.as_str()
+        ))
+    }
+
+    async fn append_access_audit(
+        &self,
+        subject_ref: SubjectRef,
+        action: AuditAction,
+        actor: ActorContext,
+        meta: &QueryMetadata,
+    ) -> Result<(), ApplicationError> {
+        let scope = match &action {
+            AuditAction::PrivilegedAccess { scope, .. } => *scope,
+            _ => {
+                return Err(ApplicationError::boundary_violation(
+                    "boundary.access_audit_action",
+                    "access audit requires a privileged access action",
+                    None,
+                ));
+            }
+        };
+        let entry = bus_domain::audit::BusAuditEntry::record(
+            Self::access_audit_ref(scope, meta),
+            subject_ref,
+            action,
+            actor,
+            meta.request.trace_id.clone(),
+            meta.request.requested_at.clone(),
+        );
+
+        self.deps
+            .audit_repository
+            .append_access(entry)
+            .await
+            .map(|_| ())
+            .map_err(ApplicationError::from)
+    }
+
+    fn privileged_access_error(reason: PrivilegedAccessRejectionReason) -> ApplicationError {
+        match reason {
+            PrivilegedAccessRejectionReason::MissingAuthorizationRef => {
+                ApplicationError::boundary_violation(
+                    "boundary.authorization_ref_required",
+                    "a trusted authorization_ref is required for this privileged read",
+                    None,
+                )
+            }
+            PrivilegedAccessRejectionReason::MissingRoleHint => {
+                ApplicationError::boundary_violation(
+                    "boundary.privileged_role_hint_required",
+                    "a trusted actor role hint is required for this privileged read",
+                    None,
+                )
+            }
+        }
+    }
 }
 
 impl<P, D, F, A, R, V> ReadOutputUseCase for ReadOutputService<P, D, F, A, R, V>
@@ -161,6 +240,7 @@ where
         &self,
         query: GetPublicationAcceptanceQuery,
         _actor: ActorContext,
+        _meta: QueryMetadata,
     ) -> Result<PublicationAcceptanceView, ApplicationError> {
         let acceptance = self
             .deps
@@ -209,6 +289,7 @@ where
         &self,
         query: GetDeliveryStatusQuery,
         _actor: ActorContext,
+        _meta: QueryMetadata,
     ) -> Result<DeliveryStatusView, ApplicationError> {
         let delivery = self
             .deps
@@ -253,6 +334,7 @@ where
         &self,
         query: ListDeliveryHistoryQuery,
         _actor: ActorContext,
+        _meta: QueryMetadata,
     ) -> Result<DeliveryHistoryPage, ApplicationError> {
         let delivery = self
             .deps
@@ -292,6 +374,7 @@ where
         &self,
         query: GetTransportViewQuery,
         _actor: ActorContext,
+        _meta: QueryMetadata,
     ) -> Result<TransportView, ApplicationError> {
         let projection = self
             .deps
@@ -335,36 +418,94 @@ where
     async fn get_failure_summary(
         &self,
         query: GetFailureSummaryQuery,
-        _actor: ActorContext,
+        actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<FailureSummaryView, ApplicationError> {
-        let projection = self
+        let access_subject_ref =
+            SubjectRef::ReadOutput(query.failure_summary_id.as_str().to_owned());
+        if let Err(reason) = self.policy.authorize_sensitive_read(
+            PrivilegedAccessScope::FailureSummary,
+            &actor,
+            query.authorization_ref.as_ref(),
+        ) {
+            self.append_access_audit(
+                access_subject_ref,
+                AuditAction::PrivilegedAccess {
+                    scope: PrivilegedAccessScope::FailureSummary,
+                    decision: PrivilegedAccessDecision::Rejected(reason),
+                },
+                actor,
+                &meta,
+            )
+            .await?;
+            return Err(Self::privileged_access_error(reason));
+        }
+
+        let projection = match self
             .deps
             .projection_repository
             .get_failure_summary_projection(&query.failure_summary_id)
             .await?
-            .ok_or_else(|| {
-                Self::not_found(
+        {
+            Some(projection) => projection,
+            None => {
+                self.append_access_audit(
+                    access_subject_ref,
+                    AuditAction::PrivilegedAccess {
+                        scope: PrivilegedAccessScope::FailureSummary,
+                        decision: PrivilegedAccessDecision::Granted,
+                    },
+                    actor,
+                    &meta,
+                )
+                .await?;
+                return Err(Self::not_found(
                     "not_found.failure_summary",
                     format!(
                         "failure summary '{}' was not found",
                         query.failure_summary_id.as_str()
                     ),
-                )
-            })?;
-        let material = self
+                ));
+            }
+        };
+        let material = match self
             .deps
             .recovery_repository
             .get_failure_material(&projection.failure_material_id)
             .await?
-            .ok_or_else(|| {
-                Self::not_found(
+        {
+            Some(material) => material,
+            None => {
+                self.append_access_audit(
+                    SubjectRef::ReadOutput(query.failure_summary_id.as_str().to_owned()),
+                    AuditAction::PrivilegedAccess {
+                        scope: PrivilegedAccessScope::FailureSummary,
+                        decision: PrivilegedAccessDecision::Granted,
+                    },
+                    actor,
+                    &meta,
+                )
+                .await?;
+                return Err(Self::not_found(
                     "not_found.failure_material",
                     format!(
                         "failure material '{}' was not found",
                         projection.failure_material_id.as_str()
                     ),
-                )
-            })?;
+                ));
+            }
+        };
+
+        self.append_access_audit(
+            SubjectRef::ReadOutput(query.failure_summary_id.as_str().to_owned()),
+            AuditAction::PrivilegedAccess {
+                scope: PrivilegedAccessScope::FailureSummary,
+                decision: PrivilegedAccessDecision::Granted,
+            },
+            actor,
+            &meta,
+        )
+        .await?;
 
         Ok(FailureSummaryView {
             failure_summary_id: projection.summary_id,
@@ -380,19 +521,58 @@ where
     async fn get_bus_audit_trail(
         &self,
         query: GetBusAuditTrailQuery,
-        _actor: ActorContext,
+        actor: ActorContext,
+        meta: QueryMetadata,
     ) -> Result<BusAuditTrailView, ApplicationError> {
-        self.deps
+        let access_subject_ref = SubjectRef::ReadOutput("bus_audit_trail".to_owned());
+        let decision = self
+            .policy
+            .authorize_sensitive_read(
+                PrivilegedAccessScope::BusAuditTrail,
+                &actor,
+                query.authorization_ref.as_ref(),
+            )
+            .map(|_| PrivilegedAccessDecision::Granted);
+        if let Err(reason) = decision {
+            self.append_access_audit(
+                access_subject_ref,
+                AuditAction::PrivilegedAccess {
+                    scope: PrivilegedAccessScope::BusAuditTrail,
+                    decision: PrivilegedAccessDecision::Rejected(reason),
+                },
+                actor,
+                &meta,
+            )
+            .await?;
+            return Err(Self::privileged_access_error(reason));
+        }
+
+        let view = self
+            .deps
             .audit_repository
             .list(query.filter, query.page)
             .await
-            .map_err(ApplicationError::from)
+            .map_err(ApplicationError::from)?;
+
+        self.append_access_audit(
+            access_subject_ref,
+            AuditAction::PrivilegedAccess {
+                scope: PrivilegedAccessScope::BusAuditTrail,
+                decision: PrivilegedAccessDecision::Granted,
+            },
+            actor,
+            &meta,
+        )
+        .await?;
+
+        Ok(view)
     }
 
     async fn get_backend_health_view(
         &self,
         query: GetBackendHealthViewQuery,
         _actor: ActorContext,
+        _meta: QueryMetadata,
     ) -> Result<BackendHealthView, ApplicationError> {
         let view = self
             .deps

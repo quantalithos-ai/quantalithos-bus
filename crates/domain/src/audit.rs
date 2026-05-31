@@ -15,6 +15,8 @@ pub enum SubjectRef {
     Publication(PublicationId),
     /// A delivery progression subject.
     Delivery(DeliveryId),
+    /// A read-only output or privileged access subject.
+    ReadOutput(String),
     /// A retry-plan subject.
     RetryPlan(RetryPlanId),
     /// A dead-letter subject.
@@ -36,6 +38,7 @@ impl SubjectRef {
         match self {
             Self::Publication(publication_id) => publication_id.as_str().to_owned(),
             Self::Delivery(delivery_id) => delivery_id.as_str().to_owned(),
+            Self::ReadOutput(record_ref) => record_ref.clone(),
             Self::RetryPlan(retry_plan_id) => retry_plan_id.as_str().to_owned(),
             Self::DeadLetter(dead_letter_id) => dead_letter_id.as_str().to_owned(),
             Self::ReplayPreparation(replay_preparation_id) => {
@@ -44,6 +47,35 @@ impl SubjectRef {
             Self::IdempotencyKey { key, .. } => key.as_str().to_owned(),
         }
     }
+}
+
+/// The privileged scope recorded by one access audit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrivilegedAccessScope {
+    /// One failure-summary projection read.
+    FailureSummary,
+    /// One bus-audit-trail read.
+    BusAuditTrail,
+    /// One replay-preparation operation.
+    ReplayPreparation,
+}
+
+/// The stable rejection reason for a privileged access attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrivilegedAccessRejectionReason {
+    /// The trusted authorization reference was missing.
+    MissingAuthorizationRef,
+    /// The trusted actor context did not carry any role hint.
+    MissingRoleHint,
+}
+
+/// The decision recorded for a privileged access attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrivilegedAccessDecision {
+    /// The privileged access attempt was granted.
+    Granted,
+    /// The privileged access attempt was rejected.
+    Rejected(PrivilegedAccessRejectionReason),
 }
 
 /// A stable audit action emitted by the publication write path.
@@ -71,6 +103,13 @@ pub enum AuditAction {
     DeadLetterCreated,
     /// A replay preparation became ready.
     ReplayPreparationReady,
+    /// A privileged read or operation was granted or rejected.
+    PrivilegedAccess {
+        /// The scope protected by the access seam.
+        scope: PrivilegedAccessScope,
+        /// The access decision that was taken.
+        decision: PrivilegedAccessDecision,
+    },
     /// A backend signal was ignored because no committed delivery truth matched it.
     BackendSignalIgnored,
     /// A timeout signal was ignored because no committed delivery truth matched it.
@@ -94,6 +133,27 @@ impl AuditAction {
             Self::RetryExhausted => "retry_exhausted",
             Self::DeadLetterCreated => "dead_letter_created",
             Self::ReplayPreparationReady => "replay_preparation_ready",
+            Self::PrivilegedAccess { scope, decision } => match (scope, decision) {
+                (PrivilegedAccessScope::FailureSummary, PrivilegedAccessDecision::Granted) => {
+                    "failure_summary_access_granted"
+                }
+                (PrivilegedAccessScope::FailureSummary, PrivilegedAccessDecision::Rejected(_)) => {
+                    "failure_summary_access_rejected"
+                }
+                (PrivilegedAccessScope::BusAuditTrail, PrivilegedAccessDecision::Granted) => {
+                    "bus_audit_trail_access_granted"
+                }
+                (PrivilegedAccessScope::BusAuditTrail, PrivilegedAccessDecision::Rejected(_)) => {
+                    "bus_audit_trail_access_rejected"
+                }
+                (PrivilegedAccessScope::ReplayPreparation, PrivilegedAccessDecision::Granted) => {
+                    "replay_preparation_access_granted"
+                }
+                (
+                    PrivilegedAccessScope::ReplayPreparation,
+                    PrivilegedAccessDecision::Rejected(_),
+                ) => "replay_preparation_access_rejected",
+            },
             Self::BackendSignalIgnored => "backend_signal_ignored",
             Self::TimeoutSignalIgnored => "timeout_signal_ignored",
             Self::IdempotencyConflict => "idempotency_conflict",

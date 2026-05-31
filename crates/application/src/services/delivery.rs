@@ -541,6 +541,15 @@ mod tests {
             Ok(next_sequence)
         }
 
+        async fn append_access(
+            &self,
+            entry: BusAuditEntry,
+        ) -> Result<u64, crate::errors::RepositoryError> {
+            let mut inner = self.state.inner.lock().expect("test state lock poisoned");
+            inner.audits.push(entry);
+            Ok(inner.audits.len() as u64)
+        }
+
         async fn list(
             &self,
             _filter: bus_contracts::queries::AuditFilter,

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub use core_contracts::actor::{ActorContext, ActorKind, ActorRef, RequestOrigin};
 pub use core_contracts::metadata::{
     CommandMetadata, IdempotencyKey, JobRunId, PageRequest, PageToken, QueryConsistency,
-    QueryMetadata, RequestId, RequestMetadata, Timestamp, TraceId, Version,
+    QueryMetadata, RequestId, RequestMetadata, RoleRef, Timestamp, TraceId, Version,
 };
 
 /// Reuses the shared core trace identifier as the bus trace reference.
@@ -80,6 +80,10 @@ macro_rules! numeric_newtype {
 }
 
 string_newtype!(AuditRef, "A reference to a committed bus audit entry.");
+string_newtype!(
+    AuthorizationRef,
+    "A trusted authorization reference for privileged bus reads or operations."
+);
 string_newtype!(AuditChainRef, "A reference to a committed bus audit chain.");
 string_newtype!(AuditCursor, "A cursor for committed bus-audit scans.");
 string_newtype!(AuditEventKind, "A stable bus-audit event kind.");

@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_contracts-a523fa032f3ceee8)
+
+running 6 tests
+test events::tests::event_batch_defaults_to_empty ... ok
+test events::tests::outbound_event_validation_rejects_inline_payload_like_reference ... ok
+test events::tests::outbound_event_validation_rejects_wrong_schema_version ... ok
+test events::tests::publication_accepted_event_roundtrips ... ok
+test events::tests::transport_and_failure_events_stay_reference_only ... ok
+test events::tests::all_outbound_payload_variants_serialize ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 34 filtered out; finished in 0.00s
+

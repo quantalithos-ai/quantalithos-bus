@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{
-    AuditEventKind, BackendId, DeliveryId, FailureSummaryId, PageRequest, PublicationId,
-    TransportViewId,
+    AuditEventKind, AuthorizationRef, BackendId, DeliveryId, FailureSummaryId, PageRequest,
+    PublicationId, TransportViewId,
 };
 
 /// Queries one publication-acceptance result.
@@ -47,6 +47,8 @@ pub struct GetTransportViewQuery {
 pub struct GetFailureSummaryQuery {
     /// The target failure-summary identifier.
     pub failure_summary_id: FailureSummaryId,
+    /// The trusted authorization reference for this privileged read.
+    pub authorization_ref: Option<AuthorizationRef>,
 }
 
 /// Filters one audit-trail query.
@@ -67,6 +69,8 @@ pub struct GetBusAuditTrailQuery {
     pub filter: AuditFilter,
     /// The requested page boundary.
     pub page: PageRequest,
+    /// The trusted authorization reference for this privileged read.
+    pub authorization_ref: Option<AuthorizationRef>,
 }
 
 /// Queries the current backend-health view.

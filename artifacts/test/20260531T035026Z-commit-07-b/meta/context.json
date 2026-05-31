@@ -1,0 +1,13 @@
+{
+  "run_id": "20260531T035026Z-commit-07-b",
+  "phase": "PH-07",
+  "commit_boundary": "commit-07-b",
+  "design_repo_commit": "8ff4797f0dd5c67b1b5ca4776acb40bd6412ab29",
+  "design_scope": [
+    "ReadOutputFlow",
+    "OutboundEventPublishFlow",
+    "QueryApiFailureSummaryFlow",
+    "RedactionCheck"
+  ],
+  "reviewer": "Codex"
+}

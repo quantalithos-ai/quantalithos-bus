@@ -17,6 +17,9 @@ pub trait AuditTrailRepository: Send + Sync {
         uow: &UnitOfWorkHandle,
     ) -> Result<u64, RepositoryError>;
 
+    /// Appends one access-audit entry without opening a write transaction.
+    async fn append_access(&self, entry: BusAuditEntry) -> Result<u64, RepositoryError>;
+
     /// Lists committed audit entries using one query filter and page boundary.
     async fn list(
         &self,

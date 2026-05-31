@@ -165,6 +165,13 @@ impl InMemoryAuditTrailRepository {
     pub fn committed_entries(&self) -> Vec<BusAuditEntry> {
         self.store.audit_entries()
     }
+
+    fn take_append_failpoint(&self) -> Option<RepositoryError> {
+        self.fail_next_append
+            .lock()
+            .expect("audit failpoint lock poisoned")
+            .take()
+    }
 }
 
 impl AuditTrailRepository for InMemoryAuditTrailRepository {
@@ -173,16 +180,19 @@ impl AuditTrailRepository for InMemoryAuditTrailRepository {
         entry: BusAuditEntry,
         uow: &UnitOfWorkHandle,
     ) -> Result<u64, RepositoryError> {
-        if let Some(error) = self
-            .fail_next_append
-            .lock()
-            .expect("audit failpoint lock poisoned")
-            .take()
-        {
+        if let Some(error) = self.take_append_failpoint() {
             return Err(error);
         }
 
         self.store.stage_audit_entry(uow.transaction_id, entry)
+    }
+
+    async fn append_access(&self, entry: BusAuditEntry) -> Result<u64, RepositoryError> {
+        if let Some(error) = self.take_append_failpoint() {
+            return Err(error);
+        }
+
+        self.store.append_access_audit_entry(entry)
     }
 
     async fn list(

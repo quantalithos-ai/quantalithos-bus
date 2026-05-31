@@ -1,0 +1,18 @@
+{
+  "run_id": "20260531T035026Z-commit-07-b",
+  "suite": "output",
+  "artifacts": [
+    "meta/context.json",
+    "suites/output/fmt.log",
+    "suites/output/cargo-check.log",
+    "suites/output/contracts.log",
+    "suites/output/application.log",
+    "suites/output/api.log",
+    "suites/output/workspace.log",
+    "suites/redaction/check.log"
+  ],
+  "reports": [
+    "reports/runs/20260531T035026Z-commit-07-b/evidence/EV-BUS-OUT.md",
+    "reports/runs/20260531T035026Z-commit-07-b/redaction-check.md"
+  ]
+}

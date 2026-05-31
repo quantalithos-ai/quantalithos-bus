@@ -6,6 +6,7 @@ mod delivery;
 mod feedback;
 mod id_generator;
 mod idempotency;
+mod outbox_publisher;
 mod outbox_source;
 mod projection;
 mod publication;
@@ -19,6 +20,10 @@ pub use delivery::DeliveryRepository;
 pub use feedback::FeedbackRepository;
 pub use id_generator::{BusRecordKind, IdGeneratorPort};
 pub use idempotency::IdempotencyRepository;
+pub use outbox_publisher::{
+    OutboxPublisherPort, PublishBatchReceipt, PublishEvidenceRecord, PublishEvidenceStatus,
+    PublishReceipt,
+};
 pub use outbox_source::OutboxFactSourcePort;
 pub use projection::ReadProjectionRepository;
 pub use publication::PublicationRepository;

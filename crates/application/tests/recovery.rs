@@ -12,10 +12,14 @@ use bus_contracts::fixtures::{
     RecoveryFixtureBuilder, TestRun, TestRunBuilder,
 };
 use bus_contracts::metadata::{
-    AuditChainRef, AuditRef, DeliveryStatus, FeedbackKind, FeedbackReason, FeedbackStatus,
-    HistoryReason, IdempotencyKey, SubscriberRef, SubscriberScope, Timestamp,
+    ActorContext, AuditChainRef, AuditRef, DeliveryStatus, FeedbackKind, FeedbackReason,
+    FeedbackStatus, HistoryReason, IdempotencyKey, RequestOrigin, RoleRef, SubscriberRef,
+    SubscriberScope, Timestamp,
 };
-use bus_domain::audit::{AuditAction, BusAuditEntry, SubjectRef};
+use bus_domain::audit::{
+    AuditAction, BusAuditEntry, PrivilegedAccessDecision, PrivilegedAccessRejectionReason,
+    PrivilegedAccessScope, SubjectRef,
+};
 use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
 use bus_domain::feedback::FeedbackResult;
 use bus_domain::publication::{PublicationMaterial, TransportSemantic};
@@ -81,6 +85,12 @@ where
             Poll::Pending => std::thread::yield_now(),
         }
     }
+}
+
+fn privileged_operations_actor(run: &TestRun) -> ActorContext {
+    let mut actor = ActorContext::new(run.actor.actor_ref().clone(), RequestOrigin::Operations);
+    actor.role_refs.push(RoleRef::new("role_recovery_operator"));
+    actor
 }
 
 fn build_harness(run: &TestRun) -> Harness {
@@ -347,6 +357,7 @@ fn move_to_dead_letter_links_existing_failure_material_and_updates_delivery() {
 fn prepare_replay_requires_a_non_blank_approval_reference() {
     let run = TestRunBuilder::new("svc-rec-003a").build();
     let harness = build_harness(&run);
+    let actor = privileged_operations_actor(&run);
     let (delivery, failure_material) = seed_failed_delivery_with_material(&harness, &run);
     let builder = RecoveryFixtureBuilder::new(run.clone());
     let mut dead_letter_command = builder.move_to_dead_letter_command(delivery.delivery_id.clone());
@@ -362,11 +373,11 @@ fn prepare_replay_requires_a_non_blank_approval_reference() {
     command.audit_chain_ref = AuditChainRef::from_audit_ref(&failure_material.audit_ref);
     command.approval_ref = "".into();
 
-    let error = block_on(harness.replay_service.prepare(
-        command,
-        run.actor.clone(),
-        run.metadata.clone(),
-    ))
+    let error = block_on(
+        harness
+            .replay_service
+            .prepare(command, actor, run.metadata.clone()),
+    )
     .expect_err("blank approval must be rejected");
 
     assert_eq!(
@@ -379,6 +390,7 @@ fn prepare_replay_requires_a_non_blank_approval_reference() {
 fn prepare_replay_rejects_unknown_audit_chain_without_creating_ready_state() {
     let run = TestRunBuilder::new("svc-rec-003b").build();
     let harness = build_harness(&run);
+    let actor = privileged_operations_actor(&run);
     let (delivery, failure_material) = seed_failed_delivery_with_material(&harness, &run);
     let builder = RecoveryFixtureBuilder::new(run.clone());
     let mut dead_letter_command = builder.move_to_dead_letter_command(delivery.delivery_id.clone());
@@ -393,11 +405,11 @@ fn prepare_replay_rejects_unknown_audit_chain_without_creating_ready_state() {
     let mut command = builder.prepare_replay_command(dead_letter.dead_letter_id.clone());
     command.audit_chain_ref = AuditChainRef::new("audit_chain_missing");
 
-    let error = block_on(harness.replay_service.prepare(
-        command,
-        run.actor.clone(),
-        run.metadata.clone(),
-    ))
+    let error = block_on(
+        harness
+            .replay_service
+            .prepare(command, actor, run.metadata.clone()),
+    )
     .expect_err("unknown audit chain must be rejected");
 
     assert_eq!(
@@ -408,8 +420,8 @@ fn prepare_replay_rejects_unknown_audit_chain_without_creating_ready_state() {
 }
 
 #[test]
-fn prepare_replay_commits_ready_preparation_after_dead_letter() {
-    let run = TestRunBuilder::new("svc-rec-004").build();
+fn prepare_replay_rejects_missing_role_hint_with_access_audit() {
+    let run = TestRunBuilder::new("svc-rec-003c").build();
     let harness = build_harness(&run);
     let (delivery, failure_material) = seed_failed_delivery_with_material(&harness, &run);
     let builder = RecoveryFixtureBuilder::new(run.clone());
@@ -425,11 +437,51 @@ fn prepare_replay_commits_ready_preparation_after_dead_letter() {
     let mut command = builder.prepare_replay_command(dead_letter.dead_letter_id.clone());
     command.audit_chain_ref = AuditChainRef::from_audit_ref(&failure_material.audit_ref);
 
-    let result = block_on(harness.replay_service.prepare(
+    let error = block_on(harness.replay_service.prepare(
         command,
         run.actor.clone(),
         run.metadata.clone(),
     ))
+    .expect_err("missing role hint must be rejected");
+
+    assert_eq!(error.code(), "boundary.privileged_role_hint_required");
+    let audits = harness.audit_repository.committed_entries();
+    assert_eq!(audits.len(), 3);
+    assert_eq!(
+        audits[2].action,
+        AuditAction::PrivilegedAccess {
+            scope: PrivilegedAccessScope::ReplayPreparation,
+            decision: PrivilegedAccessDecision::Rejected(
+                PrivilegedAccessRejectionReason::MissingRoleHint,
+            ),
+        }
+    );
+}
+
+#[test]
+fn prepare_replay_commits_ready_preparation_after_dead_letter() {
+    let run = TestRunBuilder::new("svc-rec-004").build();
+    let harness = build_harness(&run);
+    let actor = privileged_operations_actor(&run);
+    let (delivery, failure_material) = seed_failed_delivery_with_material(&harness, &run);
+    let builder = RecoveryFixtureBuilder::new(run.clone());
+    let mut dead_letter_command = builder.move_to_dead_letter_command(delivery.delivery_id.clone());
+    dead_letter_command.failure_material_ref = failure_material.failure_material_id.clone().into();
+    let dead_letter = block_on(harness.recovery_service.move_to_dead_letter(
+        dead_letter_command,
+        run.actor.clone(),
+        run.metadata.clone(),
+    ))
+    .expect("dead letter should commit");
+
+    let mut command = builder.prepare_replay_command(dead_letter.dead_letter_id.clone());
+    command.audit_chain_ref = AuditChainRef::from_audit_ref(&failure_material.audit_ref);
+
+    let result = block_on(
+        harness
+            .replay_service
+            .prepare(command, actor, run.metadata.clone()),
+    )
     .expect("replay preparation should commit");
 
     let committed = harness

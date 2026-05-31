@@ -716,6 +716,15 @@ impl SharedMemoryStore {
         Ok(next_sequence)
     }
 
+    /// Appends an access-audit entry directly to committed storage.
+    pub fn append_access_audit_entry(&self, entry: BusAuditEntry) -> Result<u64, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        inner.next_audit_sequence += 1;
+        let next_sequence = inner.next_audit_sequence;
+        inner.audits.push(entry);
+        Ok(next_sequence)
+    }
+
     /// Returns committed audit entries.
     pub fn audit_entries(&self) -> Vec<BusAuditEntry> {
         self.inner

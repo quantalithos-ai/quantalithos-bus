@@ -9,7 +9,10 @@ use bus_contracts::metadata::{
     RecoveryPolicyConfigRef, RetryScanCursor, Timestamp,
 };
 use bus_contracts::receipts::{DeadLetterResult, ReplayPreparationResult, RetryPlanResult};
-use bus_domain::audit::{AuditAction, BusAuditEntry, SubjectRef};
+use bus_domain::audit::{
+    AuditAction, BusAuditEntry, PrivilegedAccessDecision, PrivilegedAccessRejectionReason,
+    PrivilegedAccessScope, SubjectRef,
+};
 use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
 use bus_domain::recovery::{
     DeadLetterEntry, FailureMaterial, RecoveryEligibilityPolicy, ReplayPreparation, RetryPlan,
@@ -877,6 +880,62 @@ where
 
         Ok(())
     }
+
+    fn validate_privileged_actor(
+        actor: &ActorContext,
+    ) -> Result<(), PrivilegedAccessRejectionReason> {
+        if actor.role_refs.is_empty() {
+            return Err(PrivilegedAccessRejectionReason::MissingRoleHint);
+        }
+
+        Ok(())
+    }
+
+    fn privileged_access_error(reason: PrivilegedAccessRejectionReason) -> ApplicationError {
+        match reason {
+            PrivilegedAccessRejectionReason::MissingAuthorizationRef => {
+                ApplicationError::boundary_violation(
+                    "boundary.authorization_ref_required",
+                    "a trusted authorization_ref is required for replay preparation",
+                    None,
+                )
+            }
+            PrivilegedAccessRejectionReason::MissingRoleHint => {
+                ApplicationError::boundary_violation(
+                    "boundary.privileged_role_hint_required",
+                    "a trusted actor role hint is required for replay preparation",
+                    None,
+                )
+            }
+        }
+    }
+
+    async fn append_access_audit(
+        &self,
+        subject_ref: SubjectRef,
+        decision: PrivilegedAccessDecision,
+        actor: ActorContext,
+        meta: &bus_contracts::metadata::CommandMetadata,
+    ) -> Result<(), ApplicationError> {
+        let entry = BusAuditEntry::record(
+            self.next_audit_ref()?,
+            subject_ref,
+            AuditAction::PrivilegedAccess {
+                scope: PrivilegedAccessScope::ReplayPreparation,
+                decision,
+            },
+            actor,
+            meta.request.trace_id.clone(),
+            meta.request.requested_at.clone(),
+        );
+
+        self.deps
+            .audit_repository
+            .append_access(entry)
+            .await
+            .map(|_| ())
+            .map_err(ApplicationError::from)
+    }
 }
 
 impl<R, A, U, C, G> ReplayPreparationUseCase for ReplayPreparationService<R, A, U, C, G>
@@ -894,6 +953,16 @@ where
         meta: bus_contracts::metadata::CommandMetadata,
     ) -> Result<ReplayPreparationResult, ApplicationError> {
         Self::validate_prepare_replay(&command)?;
+        if let Err(reason) = Self::validate_privileged_actor(&actor) {
+            self.append_access_audit(
+                SubjectRef::DeadLetter(command.dead_letter_id.clone()),
+                PrivilegedAccessDecision::Rejected(reason),
+                actor,
+                &meta,
+            )
+            .await?;
+            return Err(Self::privileged_access_error(reason));
+        }
 
         let uow = self
             .deps

@@ -145,6 +145,19 @@ pub enum SourcePortError {
     BoundaryViolation,
 }
 
+/// Outbound publisher-port failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PublisherPortError {
+    /// The publisher is temporarily unavailable.
+    RetryableFailure,
+    /// The outbound event schema is invalid.
+    SchemaViolation,
+    /// The outbound event crossed a protected boundary.
+    BoundaryViolation,
+    /// The outbound event was already published and the receipt may be reused.
+    Duplicate,
+}
+
 /// Transport-backend port failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TransportPortError {
@@ -443,6 +456,34 @@ impl From<DomainError> for ApplicationError {
             DomainError::ReadOnlyProjectionViolation => Self::boundary_violation(
                 "boundary.read_only_projection_rejected",
                 error.to_string(),
+                None,
+            ),
+        }
+    }
+}
+
+impl From<PublisherPortError> for ApplicationError {
+    fn from(error: PublisherPortError) -> Self {
+        match error {
+            PublisherPortError::RetryableFailure => Self::dependency(
+                "dependency.outbound_publisher_unavailable",
+                "outbound publisher is temporarily unavailable",
+                true,
+                None,
+            ),
+            PublisherPortError::SchemaViolation => Self::boundary_violation(
+                "boundary.outbound_event_schema_rejected",
+                "outbound event schema is invalid",
+                None,
+            ),
+            PublisherPortError::BoundaryViolation => Self::boundary_violation(
+                "boundary.outbound_event_rejected",
+                "outbound event crossed a protected boundary",
+                None,
+            ),
+            PublisherPortError::Duplicate => Self::conflict(
+                "conflict.outbound_event_duplicate",
+                "outbound event was already published",
                 None,
             ),
         }

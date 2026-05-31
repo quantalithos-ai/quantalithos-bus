@@ -1,11 +1,11 @@
 //! Read-only projection objects and guards.
 
 use bus_contracts::metadata::{
-    AuditRef, DeadLetterRef, DeliveryId, FailureMaterialId, ProjectionVersion, ReadOnlyPolicyRef,
-    TransportViewId,
+    ActorContext, AuditRef, AuthorizationRef, DeadLetterRef, DeliveryId, FailureMaterialId,
+    ProjectionVersion, ReadOnlyPolicyRef, TransportViewId,
 };
 
-use crate::audit::BusAuditEntry;
+use crate::audit::{BusAuditEntry, PrivilegedAccessRejectionReason, PrivilegedAccessScope};
 use crate::delivery::DeliveryRecord;
 use crate::errors::DomainError;
 use crate::recovery::FailureMaterial;
@@ -158,6 +158,15 @@ pub enum ProjectionWriteIntent {
     TruthWrite,
 }
 
+/// The resolved authorization material for one privileged read.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivilegedReadAuthorization {
+    /// The privileged scope validated by the read-only policy.
+    pub scope: PrivilegedAccessScope,
+    /// The trusted authorization reference provided by the caller.
+    pub authorization_ref: AuthorizationRef,
+}
+
 /// A guard that rejects truth writes from read-only output code paths.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadOnlyOutputPolicy {
@@ -182,23 +191,47 @@ impl ReadOnlyOutputPolicy {
     pub fn rejects_truth_write(&self, intent: ProjectionWriteIntent) -> bool {
         matches!(intent, ProjectionWriteIntent::TruthWrite)
     }
+
+    /// Validates the privileged seam for one sensitive read.
+    pub fn authorize_sensitive_read(
+        &self,
+        scope: PrivilegedAccessScope,
+        actor: &ActorContext,
+        authorization_ref: Option<&AuthorizationRef>,
+    ) -> Result<PrivilegedReadAuthorization, PrivilegedAccessRejectionReason> {
+        let authorization_ref = authorization_ref
+            .filter(|value| !value.as_str().trim().is_empty())
+            .ok_or(PrivilegedAccessRejectionReason::MissingAuthorizationRef)?;
+        if actor.role_refs.is_empty() {
+            return Err(PrivilegedAccessRejectionReason::MissingRoleHint);
+        }
+
+        Ok(PrivilegedReadAuthorization {
+            scope,
+            authorization_ref: authorization_ref.clone(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use bus_contracts::metadata::{
-        ActorContext, ActorKind, ActorRef, AuditRef, DeliveryMode, PayloadDigest, PayloadKind,
-        PayloadRef, RequestOrigin, SourceRecordRef, SourceSystem, TargetScope, Timestamp,
+        ActorContext, ActorKind, ActorRef, AuditRef, AuthorizationRef, DeliveryMode, PayloadDigest,
+        PayloadKind, PayloadRef, RequestOrigin, RoleRef, SourceRecordRef, SourceSystem,
+        TargetScope, Timestamp,
     };
 
-    use crate::audit::{AuditAction, BusAuditEntry, SubjectRef};
+    use crate::audit::{
+        AuditAction, BusAuditEntry, PrivilegedAccessRejectionReason, PrivilegedAccessScope,
+        SubjectRef,
+    };
     use crate::delivery::DeliveryRecord;
     use crate::publication::{PublicationMaterial, TransportSemantic};
     use crate::recovery::FailureMaterial;
 
     use super::{
-        FailureSummaryProjection, ProjectionStatus, ProjectionWriteIntent, ReadOnlyOutputPolicy,
-        TransportViewProjection,
+        FailureSummaryProjection, PrivilegedReadAuthorization, ProjectionStatus,
+        ProjectionWriteIntent, ReadOnlyOutputPolicy, TransportViewProjection,
     };
 
     fn actor() -> ActorContext {
@@ -206,6 +239,15 @@ mod tests {
             ActorRef::new("actor_projection", ActorKind::System),
             RequestOrigin::Job,
         )
+    }
+
+    fn privileged_actor() -> ActorContext {
+        let mut actor = ActorContext::new(
+            ActorRef::new("actor_projection_query", ActorKind::Human),
+            RequestOrigin::Query,
+        );
+        actor.role_refs.push(RoleRef::new("role_projection_reader"));
+        actor
     }
 
     fn audit(audit_ref: &str) -> BusAuditEntry {
@@ -313,5 +355,59 @@ mod tests {
 
         assert!(policy.allows_projection_write(ProjectionWriteIntent::ProjectionOnly));
         assert!(policy.rejects_truth_write(ProjectionWriteIntent::TruthWrite));
+    }
+
+    #[test]
+    fn authorize_sensitive_read_requires_authorization_reference() {
+        let policy = ReadOnlyOutputPolicy::default_for_projection();
+
+        let error = policy
+            .authorize_sensitive_read(
+                PrivilegedAccessScope::FailureSummary,
+                &privileged_actor(),
+                None,
+            )
+            .expect_err("missing authorization reference must be rejected");
+
+        assert_eq!(
+            error,
+            PrivilegedAccessRejectionReason::MissingAuthorizationRef
+        );
+    }
+
+    #[test]
+    fn authorize_sensitive_read_requires_role_hint() {
+        let policy = ReadOnlyOutputPolicy::default_for_projection();
+
+        let error = policy
+            .authorize_sensitive_read(
+                PrivilegedAccessScope::BusAuditTrail,
+                &actor(),
+                Some(&AuthorizationRef::new("auth_projection_query")),
+            )
+            .expect_err("missing role hint must be rejected");
+
+        assert_eq!(error, PrivilegedAccessRejectionReason::MissingRoleHint);
+    }
+
+    #[test]
+    fn authorize_sensitive_read_accepts_actor_and_authorization_reference() {
+        let policy = ReadOnlyOutputPolicy::default_for_projection();
+
+        let authorization = policy
+            .authorize_sensitive_read(
+                PrivilegedAccessScope::FailureSummary,
+                &privileged_actor(),
+                Some(&AuthorizationRef::new("auth_projection_query")),
+            )
+            .expect("privileged actor should be authorized");
+
+        assert_eq!(
+            authorization,
+            PrivilegedReadAuthorization {
+                scope: PrivilegedAccessScope::FailureSummary,
+                authorization_ref: AuthorizationRef::new("auth_projection_query"),
+            }
+        );
     }
 }

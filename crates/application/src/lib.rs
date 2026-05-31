@@ -8,24 +8,25 @@ pub mod services;
 
 pub use errors::{
     ApplicationError, BoundaryViolationError, ConflictError, DependencyError, ErrorDetailsRef,
-    IdGenerationError, InternalError, NotFoundError, ProtocolErrorCategory, RepositoryError,
-    SourcePortError, TransportPortError, UnitOfWorkError, ValidationError,
+    IdGenerationError, InternalError, NotFoundError, ProtocolErrorCategory, PublisherPortError,
+    RepositoryError, SourcePortError, TransportPortError, UnitOfWorkError, ValidationError,
 };
 pub use ports::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, BusRecordKind,
     ClockPort, CommitReceipt, DeliveryRepository, FeedbackRepository, IdGeneratorPort,
-    IdempotencyRepository, OutboxFactSourcePort, PublicationRepository, ReadProjectionRepository,
-    RecoveryRepository, RollbackReason, TransportBackendPort, UnitOfWork, UnitOfWorkHandle,
-    UnitOfWorkPurpose,
+    IdempotencyRepository, OutboxFactSourcePort, OutboxPublisherPort, PublicationRepository,
+    PublishBatchReceipt, PublishEvidenceRecord, PublishEvidenceStatus, PublishReceipt,
+    ReadProjectionRepository, RecoveryRepository, RollbackReason, TransportBackendPort, UnitOfWork,
+    UnitOfWorkHandle, UnitOfWorkPurpose,
 };
 pub use services::{
     BackendSignalUseCase, DeliveryFeedbackUseCase, DeliveryProgressionItemResult,
     DeliveryProgressionService, DeliveryProgressionServiceDeps, DeliveryProgressionUseCase,
     FeedbackRecordingService, FeedbackRecordingServiceDeps, MoveToDeadLetterUseCase,
-    OutboxPublicationAcceptanceUseCase, OutboxRelayService, OutboxRelayServiceDeps,
-    OutboxRelayUseCase, PublicationAcceptanceService, PublicationAcceptanceServiceDeps,
-    PublicationAcceptanceUseCase, ReadOutputService, ReadOutputServiceDeps, ReadOutputUseCase,
-    RecoveryOrchestrationService, RecoveryOrchestrationServiceDeps, ReplayPreparationService,
-    ReplayPreparationServiceDeps, ReplayPreparationUseCase, RequestRetryUseCase, RetryCycleUseCase,
-    TimeoutSignalUseCase,
+    OutboxPublicationAcceptanceUseCase, OutboxPublisherService, OutboxPublisherServiceDeps,
+    OutboxPublisherUseCase, OutboxRelayService, OutboxRelayServiceDeps, OutboxRelayUseCase,
+    PublicationAcceptanceService, PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
+    ReadOutputService, ReadOutputServiceDeps, ReadOutputUseCase, RecoveryOrchestrationService,
+    RecoveryOrchestrationServiceDeps, ReplayPreparationService, ReplayPreparationServiceDeps,
+    ReplayPreparationUseCase, RequestRetryUseCase, RetryCycleUseCase, TimeoutSignalUseCase,
 };

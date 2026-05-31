@@ -38,7 +38,7 @@ where
         meta: QueryMetadata,
     ) -> Result<PublicationAcceptanceView, ApiError> {
         self.read_output
-            .get_publication_acceptance(query, actor)
+            .get_publication_acceptance(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -51,7 +51,7 @@ where
         meta: QueryMetadata,
     ) -> Result<DeliveryStatusView, ApiError> {
         self.read_output
-            .get_delivery_status(query, actor)
+            .get_delivery_status(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -64,7 +64,7 @@ where
         meta: QueryMetadata,
     ) -> Result<DeliveryHistoryPage, ApiError> {
         self.read_output
-            .list_delivery_history(query, actor)
+            .list_delivery_history(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -77,7 +77,7 @@ where
         meta: QueryMetadata,
     ) -> Result<TransportView, ApiError> {
         self.read_output
-            .get_transport_view(query, actor)
+            .get_transport_view(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -90,7 +90,7 @@ where
         meta: QueryMetadata,
     ) -> Result<FailureSummaryView, ApiError> {
         self.read_output
-            .get_failure_summary(query, actor)
+            .get_failure_summary(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -103,7 +103,7 @@ where
         meta: QueryMetadata,
     ) -> Result<BusAuditTrailView, ApiError> {
         self.read_output
-            .get_bus_audit_trail(query, actor)
+            .get_bus_audit_trail(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -116,7 +116,7 @@ where
         meta: QueryMetadata,
     ) -> Result<BackendHealthView, ApiError> {
         self.read_output
-            .get_backend_health_view(query, actor)
+            .get_backend_health_view(query, actor, meta.clone())
             .await
             .map_err(|error| ApiError::from_request(error, &meta.request))
     }
@@ -135,17 +135,23 @@ mod tests {
 
     use bus_application::{ReadOutputService, ReadOutputServiceDeps};
     use bus_contracts::fixtures::{
-        BackendFixtureBuilder, PublicationFixtureBuilder, TestRun, TestRunBuilder,
+        BackendFixtureBuilder, FeedbackFixtureBuilder, PublicationFixtureBuilder, TestRun,
+        TestRunBuilder,
     };
     use bus_contracts::metadata::{
-        CommandMetadata, DeliveryMode, IdempotencyKey, QueryConsistency, QueryMetadata,
-        RequestMetadata, SubscriberRef, SubscriberScope, Timestamp,
+        ActorContext, AuthorizationRef, CommandMetadata, DeliveryAttemptId, DeliveryMode,
+        DeliveryStatus, FailureKind, FailureMaterialRef, HistoryReason, IdempotencyKey,
+        QueryConsistency, QueryMetadata, RequestMetadata, RequestOrigin, RoleRef, SubscriberRef,
+        SubscriberScope, Timestamp,
     };
-    use bus_contracts::queries::GetTransportViewQuery;
+    use bus_contracts::queries::{GetFailureSummaryQuery, GetTransportViewQuery};
     use bus_domain::audit::{AuditAction, BusAuditEntry, SubjectRef};
+    use bus_domain::delivery::DeliveryHistoryEntry;
     use bus_domain::delivery::DeliveryRecord;
+    use bus_domain::feedback::FeedbackResult;
     use bus_domain::publication::{PublicationMaterial, TransportSemantic};
-    use bus_domain::read_output::TransportViewProjection;
+    use bus_domain::read_output::{FailureSummaryProjection, TransportViewProjection};
+    use bus_domain::recovery::FailureMaterial;
     use bus_infra::{
         InMemoryAuditTrailRepository, InMemoryDeliveryRepository, InMemoryFeedbackRepository,
         InMemoryPublicationRepository, InMemoryReadProjectionRepository,
@@ -206,6 +212,12 @@ mod tests {
         }
     }
 
+    fn privileged_query_actor(run: &TestRun) -> ActorContext {
+        let mut actor = ActorContext::new(run.actor.actor_ref().clone(), RequestOrigin::Query);
+        actor.role_refs.push(RoleRef::new("role_api_query_reader"));
+        actor
+    }
+
     fn scheduled_delivery(run: &TestRun) -> DeliveryRecord {
         let publication_builder = PublicationFixtureBuilder::new(run.clone());
         let backend_builder = BackendFixtureBuilder::new(run.clone());
@@ -253,12 +265,62 @@ mod tests {
         .expect("projection should derive")
     }
 
+    fn failure_material_for(
+        run: &TestRun,
+        delivery_id: bus_contracts::metadata::DeliveryId,
+    ) -> FailureMaterial {
+        let feedback_builder = FeedbackFixtureBuilder::new(run.clone());
+        let feedback = FeedbackResult::from_command(
+            feedback_builder.fail_command(
+                delivery_id.clone(),
+                DeliveryAttemptId::new("attempt_api_failure"),
+            ),
+            run.actor.clone(),
+        )
+        .expect("failure feedback should build");
+        let history = DeliveryHistoryEntry::transition(
+            delivery_id,
+            DeliveryStatus::Dispatching,
+            DeliveryStatus::Failed,
+            HistoryReason::delivery_failed(),
+            Timestamp::new("2026-05-31T00:00:15Z"),
+        );
+
+        FailureMaterial::from_feedback(
+            feedback,
+            history,
+            bus_contracts::metadata::AuditRef::new(format!("audit_api_failure_{}", run.run_id)),
+        )
+        .expect("failure material should derive")
+    }
+
+    fn failure_summary_projection_for(
+        material: &FailureMaterial,
+        run: &TestRun,
+    ) -> FailureSummaryProjection {
+        FailureSummaryProjection::derive(
+            material.clone(),
+            BusAuditEntry::record(
+                material.audit_ref.clone(),
+                SubjectRef::Delivery(material.delivery_id.clone()),
+                AuditAction::DeliveryFailed(
+                    bus_contracts::metadata::FailureReason::dispatch_failed(),
+                ),
+                run.actor.clone(),
+                run.metadata.request.trace_id.clone(),
+                Timestamp::new("2026-05-31T00:00:16Z"),
+            ),
+        )
+        .expect("failure summary projection should derive")
+    }
+
     fn build_api(
         _run: &TestRun,
     ) -> (
         BusQueryApi<QueryService>,
         InMemoryReadProjectionRepository,
         InMemoryDeliveryRepository,
+        InMemoryRecoveryRepository,
     ) {
         let store = SharedMemoryStore::new();
         let publication_repository = InMemoryPublicationRepository::new(store.clone());
@@ -273,20 +335,22 @@ mod tests {
             feedback_repository,
             audit_repository,
             projection_repository: projection_repository.clone(),
-            recovery_repository,
+            recovery_repository: recovery_repository.clone(),
         });
 
         (
             BusQueryApi::new(service),
             projection_repository,
             delivery_repository,
+            recovery_repository,
         )
     }
 
     #[test]
     fn get_transport_view_maps_not_found_to_404() {
         let run = TestRunBuilder::new("api-out-missing").build();
-        let (api, _projection_repository, delivery_repository) = build_api(&run);
+        let (api, _projection_repository, delivery_repository, _recovery_repository) =
+            build_api(&run);
         let delivery = scheduled_delivery(&run);
         delivery_repository
             .seed_committed(delivery.clone())
@@ -310,7 +374,8 @@ mod tests {
     #[test]
     fn get_transport_view_returns_query_view() {
         let run = TestRunBuilder::new("api-out-current").build();
-        let (api, projection_repository, delivery_repository) = build_api(&run);
+        let (api, projection_repository, delivery_repository, _recovery_repository) =
+            build_api(&run);
         let delivery = scheduled_delivery(&run);
         delivery_repository
             .seed_committed(delivery.clone())
@@ -334,5 +399,70 @@ mod tests {
             bus_contracts::metadata::ConsistencyMarker::Committed
         );
         assert_eq!(view.transport_semantic, DeliveryMode::AtLeastOnce);
+    }
+
+    #[test]
+    fn get_failure_summary_returns_api_view_without_decision_content() {
+        let run = TestRunBuilder::new("api-out-failure-summary").build();
+        let (api, projection_repository, _delivery_repository, recovery_repository) =
+            build_api(&run);
+        let actor = privileged_query_actor(&run);
+        let delivery = scheduled_delivery(&run);
+        let material = failure_material_for(&run, delivery.delivery_id.clone());
+        recovery_repository
+            .seed_failure_material(material.clone())
+            .expect("failure material should seed");
+        let projection = failure_summary_projection_for(&material, &run);
+        projection_repository
+            .seed_failure_summary_projection(projection.clone())
+            .expect("failure summary projection should seed");
+
+        let view = block_on(api.get_failure_summary(
+            GetFailureSummaryQuery {
+                failure_summary_id: projection.summary_id.clone(),
+                authorization_ref: Some(AuthorizationRef::new("auth_api_failure_summary")),
+            },
+            actor,
+            query_metadata(),
+        ))
+        .expect("failure summary api should load");
+
+        assert_eq!(view.failure_summary_id, projection.summary_id);
+        assert_eq!(
+            view.failure_material_ref,
+            FailureMaterialRef::from(material.failure_material_id)
+        );
+        assert_eq!(view.failure_kind, FailureKind::TransportFailure);
+        assert_eq!(view.governance_decision_ref, None);
+    }
+
+    #[test]
+    fn get_failure_summary_maps_missing_authorization_reference_to_422() {
+        let run = TestRunBuilder::new("api-out-failure-summary-auth").build();
+        let (api, projection_repository, _delivery_repository, recovery_repository) =
+            build_api(&run);
+        let actor = privileged_query_actor(&run);
+        let delivery = scheduled_delivery(&run);
+        let material = failure_material_for(&run, delivery.delivery_id.clone());
+        recovery_repository
+            .seed_failure_material(material.clone())
+            .expect("failure material should seed");
+        let projection = failure_summary_projection_for(&material, &run);
+        projection_repository
+            .seed_failure_summary_projection(projection.clone())
+            .expect("failure summary projection should seed");
+
+        let error = block_on(api.get_failure_summary(
+            GetFailureSummaryQuery {
+                failure_summary_id: projection.summary_id,
+                authorization_ref: None,
+            },
+            actor,
+            query_metadata(),
+        ))
+        .expect_err("missing authorization reference should map to api error");
+
+        assert_eq!(error.status_code, 422);
+        assert_eq!(error.code, "boundary.authorization_ref_required");
     }
 }

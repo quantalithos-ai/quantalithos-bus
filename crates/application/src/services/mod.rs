@@ -3,6 +3,7 @@
 mod delivery;
 mod feedback;
 mod outbox;
+mod outbox_publisher;
 mod publication;
 mod read_output;
 mod recovery;
@@ -16,6 +17,9 @@ pub use feedback::{
     FeedbackRecordingServiceDeps, TimeoutSignalUseCase,
 };
 pub use outbox::{OutboxRelayService, OutboxRelayServiceDeps, OutboxRelayUseCase};
+pub use outbox_publisher::{
+    OutboxPublisherService, OutboxPublisherServiceDeps, OutboxPublisherUseCase,
+};
 pub use publication::{
     OutboxPublicationAcceptanceUseCase, PublicationAcceptanceService,
     PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
