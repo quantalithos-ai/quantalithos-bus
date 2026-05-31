@@ -1,0 +1,5 @@
+Validate runtime profile fixture: fixtures/config/profiles/operations-recovery.json
+Reject negative fixture: unsupported-key
+Reject negative fixture: raw-secret
+Reject negative fixture: secret-unavailable
+Reject negative fixture: reload-request

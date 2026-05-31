@@ -1,0 +1,7 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_domain-bca8efd304aeb827)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_application-76667766a0b6fcb2)
+     Running tests/feedback.rs (target/debug/deps/feedback-07df37d5d1a5f321)
+     Running tests/output.rs (target/debug/deps/output-e53ea9845ebf1eae)
+     Running tests/recovery.rs (target/debug/deps/recovery-8ba70bf756191fc1)

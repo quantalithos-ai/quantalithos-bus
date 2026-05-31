@@ -1,0 +1,27 @@
+$ bash scripts/reports/generate_reports.sh --run-id 20260531T080000Z-commit-08-b --artifact-root artifacts/test/20260531T080000Z-commit-08-b --report-root reports
+Generated run reports at reports/runs/20260531T080000Z-commit-08-b
+
+$ bash scripts/reports/generate_acceptance_handoff.sh --run-id 20260531T080000Z-commit-08-b --report-root reports
+Generated acceptance handoff materials in /home/aris/Projects/quantalithos-bus/reports/acceptance
+
+$ bash scripts/reports/generate_veto_checklist.sh --run-id 20260531T080000Z-commit-08-b --report-root reports
+Generated veto checklist at /home/aris/Projects/quantalithos-bus/reports/acceptance/veto-checklist.md
+
+$ bash scripts/reports/generate_acceptance_handoff.sh --run-id 20260531T080000Z-commit-08-b --report-root reports
+Generated acceptance handoff materials in /home/aris/Projects/quantalithos-bus/reports/acceptance
+
+$ bash scripts/reports/generate_acceptance_index.sh --run-id 20260531T080000Z-commit-08-b --report-root reports
+Generated acceptance index at /home/aris/Projects/quantalithos-bus/reports/acceptance/20260531T080000Z-commit-08-b-index.md
+
+$ bash scripts/checks/check_artifact_layout.sh --artifact-root artifacts/test/20260531T080000Z-commit-08-b
+Artifact layout check passed for artifacts/test/20260531T080000Z-commit-08-b
+
+$ bash scripts/checks/check_report_links.sh --artifact-root artifacts/test/20260531T080000Z-commit-08-b --report-root reports
+Report link check passed for run 20260531T080000Z-commit-08-b
+
+$ bash scripts/checks/check_config_summary.sh --run-id 20260531T080000Z-commit-08-b --report-root reports
+Config summary check passed for run 20260531T080000Z-commit-08-b
+
+$ bash scripts/checks/check_acceptance_materials.sh --run-id 20260531T080000Z-commit-08-b --report-root reports
+Acceptance materials check passed for run 20260531T080000Z-commit-08-b
+

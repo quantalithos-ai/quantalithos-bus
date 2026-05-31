@@ -1,0 +1,10 @@
+$ cargo test -p bus-domain transport_semantic
+
+running 3 tests
+test publication::tests::transport_semantic_rejects_backend_private_leak ... ok
+test publication::tests::transport_semantic_rejects_scope_mismatch ... ok
+test publication::tests::transport_semantic_derives_from_accepted_material ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.00s
+
+

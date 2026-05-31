@@ -1,0 +1,28 @@
+{
+  "suite": "delivery",
+  "gate_suite": "bus-release-closed-loop",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:32Z",
+  "finished_at": "2026-05-31T07:14:32Z",
+  "duration_ms": 383,
+  "case_ids": [
+    "TC-BUS-DLV-001",
+    "TC-BUS-DLV-002",
+    "TC-BUS-DLV-003",
+    "TC-BUS-DLV-004"
+  ],
+  "evidence_ids": [
+    "EV-BUS-DLV-001",
+    "EV-BUS-DLV-002",
+    "EV-BUS-DLV-003",
+    "EV-BUS-DLV-004"
+  ],
+  "commands": [
+    "cargo test -p bus-domain delivery::tests",
+    "cargo test -p bus-jobs delivery_progression_job_runner"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/delivery/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/delivery/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/delivery/report.json",
+  "failed_command": null
+}

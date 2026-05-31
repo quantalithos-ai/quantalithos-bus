@@ -1,0 +1,104 @@
+{
+  "run_id": "20260531T080000Z-commit-08-b",
+  "overall_status": "passed",
+  "generated_at": "2026-05-31T07:14:36Z",
+  "reviewer": "Codex",
+  "items": [
+    {
+      "id": "VETO-BUS-001",
+      "status": "not_hit",
+      "reason": "The workspace contains a tap surface and the closed-loop reports cover read-output evidence.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-OUT.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-002",
+      "status": "not_hit",
+      "reason": "The workspace still depends on the local core-contracts path snapshot and does not redefine the shared contract boundary in reports.",
+      "evidence": [
+        "artifacts/test/20260531T080000Z-commit-08-b/meta/context.json"
+      ]
+    },
+    {
+      "id": "VETO-BUS-003",
+      "status": "not_hit",
+      "reason": "Artifact, run-report, acceptance, and review documents passed the fixed-run redaction scan.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/redaction-check.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-004",
+      "status": "not_hit",
+      "reason": "Consistency and observability review reports both confirm append-only audit and history coverage for delivery, feedback, and recovery chains.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-CONS.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-005",
+      "status": "not_hit",
+      "reason": "Recovery tests cover dead-letter creation, trusted audit-chain checks, and approval-backed replay readiness.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-REC.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-006",
+      "status": "not_hit",
+      "reason": "Authorization seam evidence shows stable rejection and access-audit coverage for sensitive read and recovery surfaces.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-SEC.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-007",
+      "status": "not_hit",
+      "reason": "Semantic and backend suites passed the normalized transport-boundary checks for the fixed run.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-BND.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-008",
+      "status": "not_hit",
+      "reason": "Failure-summary reads keep governance decision references empty and stay within the bus failure-fact boundary.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-OUT.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-009",
+      "status": "not_hit",
+      "reason": "The consistency review preserves the no-write query boundary for read projections and output material.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-CONS.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-010",
+      "status": "not_hit",
+      "reason": "Fixed-run report, artifact, and acceptance handoff roots exist and can be linked together for final review.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/artifact-index.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-011",
+      "status": "not_hit",
+      "reason": "Config runtime and negative-fixture evidence still enforce the boundary policies for the fixed run.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-CFG-FAULT.md"
+      ]
+    },
+    {
+      "id": "VETO-BUS-012",
+      "status": "not_hit",
+      "reason": "Committed outbox relay evidence passed duplicate handling and source-ack ordering checks for the fixed run.",
+      "evidence": [
+        "reports/runs/20260531T080000Z-commit-08-b/evidence/EV-BUS-OBX.md"
+      ]
+    }
+  ]
+}

@@ -88,7 +88,7 @@ write_context() {
         '{
             run_id: $run_id,
             phase: "PH-08",
-            commit_boundary: "commit-08-a",
+            commit_boundary: "commit-08-b",
             design_repo_commit: $design_repo_commit,
             workspace_commit: $workspace_commit,
             config_profile: $config_profile,
@@ -100,7 +100,10 @@ write_context() {
                 "ReportGeneration",
                 "EvidenceIndex",
                 "ConfigRuntimeValidation",
-                "AcceptanceIndex"
+                "AcceptanceIndex",
+                "AcceptanceHandoff",
+                "VetoChecklist",
+                "FinalAcceptanceChecks"
             ],
             reviewer: "Codex"
         }' >"${artifact_root_abs}/meta/context.json"
@@ -510,6 +513,15 @@ bash "${repo_root}/scripts/reports/generate_reports.sh" \
     --run-id "${run_id}" \
     --artifact-root "${artifact_root}" \
     --report-root "${report_root}"
+bash "${repo_root}/scripts/reports/generate_acceptance_handoff.sh" \
+    --run-id "${run_id}" \
+    --report-root "${report_root}"
+bash "${repo_root}/scripts/reports/generate_veto_checklist.sh" \
+    --run-id "${run_id}" \
+    --report-root "${report_root}"
+bash "${repo_root}/scripts/reports/generate_acceptance_handoff.sh" \
+    --run-id "${run_id}" \
+    --report-root "${report_root}"
 bash "${repo_root}/scripts/reports/generate_acceptance_index.sh" \
     --run-id "${run_id}" \
     --report-root "${report_root}"
@@ -527,14 +539,27 @@ run_suite_commands \
     '["TC-BUS-RED-002"]' \
     '["RP-BUS-SUM-001"]' \
     "bash scripts/reports/generate_reports.sh --run-id ${run_id} --artifact-root ${artifact_root} --report-root ${report_root}" \
+    "bash scripts/reports/generate_acceptance_handoff.sh --run-id ${run_id} --report-root ${report_root}" \
+    "bash scripts/reports/generate_veto_checklist.sh --run-id ${run_id} --report-root ${report_root}" \
+    "bash scripts/reports/generate_acceptance_handoff.sh --run-id ${run_id} --report-root ${report_root}" \
     "bash scripts/reports/generate_acceptance_index.sh --run-id ${run_id} --report-root ${report_root}" \
     "bash scripts/checks/check_artifact_layout.sh --artifact-root ${artifact_root}" \
     "bash scripts/checks/check_report_links.sh --artifact-root ${artifact_root} --report-root ${report_root}" \
-    "bash scripts/checks/check_config_summary.sh --run-id ${run_id} --report-root ${report_root}" || count_failure
+    "bash scripts/checks/check_config_summary.sh --run-id ${run_id} --report-root ${report_root}" \
+    "bash scripts/checks/check_acceptance_materials.sh --run-id ${run_id} --report-root ${report_root}" || count_failure
 
 bash "${repo_root}/scripts/reports/generate_reports.sh" \
     --run-id "${run_id}" \
     --artifact-root "${artifact_root}" \
+    --report-root "${report_root}"
+bash "${repo_root}/scripts/reports/generate_acceptance_handoff.sh" \
+    --run-id "${run_id}" \
+    --report-root "${report_root}"
+bash "${repo_root}/scripts/reports/generate_veto_checklist.sh" \
+    --run-id "${run_id}" \
+    --report-root "${report_root}"
+bash "${repo_root}/scripts/reports/generate_acceptance_handoff.sh" \
+    --run-id "${run_id}" \
     --report-root "${report_root}"
 bash "${repo_root}/scripts/reports/generate_acceptance_index.sh" \
     --run-id "${run_id}" \

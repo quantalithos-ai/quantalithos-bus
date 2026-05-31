@@ -42,9 +42,11 @@ done
 
 ensure_artifact_root_shape "${artifact_root}"
 ensure_report_root_shape "${report_root}"
+repo_root=$(repo_root)
 run_id=$(extract_run_id_from_artifact_root "${artifact_root}")
-run_report_dir="${report_root}/runs/${run_id}"
+run_report_dir="${repo_root}/${report_root}/runs/${run_id}"
 redaction_report="${run_report_dir}/redaction-check.md"
+review_dir="${repo_root}/${report_root}/review"
 ensure_directory "${run_report_dir}"
 
 forbidden_patterns=(
@@ -76,7 +78,7 @@ for pattern in "${forbidden_patterns[@]}"; do
         die "forbidden content detected in run reports: ${pattern}"
     fi
 
-    if scan_directory_for_pattern "${report_root}/acceptance" "${pattern}" >/dev/null 2>&1; then
+    if scan_directory_for_pattern "${repo_root}/${report_root}/acceptance" "${pattern}" >/dev/null 2>&1; then
         write_text_file "${redaction_report}" \
             "# Redaction Check" \
             "" \
@@ -85,6 +87,16 @@ for pattern in "${forbidden_patterns[@]}"; do
             "- Matched Pattern: ${pattern}"
         die "forbidden content detected in acceptance reports: ${pattern}"
     fi
+
+    if scan_directory_for_pattern "${review_dir}" "${pattern}" >/dev/null 2>&1; then
+        write_text_file "${redaction_report}" \
+            "# Redaction Check" \
+            "" \
+            "- Run ID: ${run_id}" \
+            "- Status: failed" \
+            "- Matched Pattern: ${pattern}"
+        die "forbidden content detected in review reports: ${pattern}"
+    fi
 done
 
 write_text_file "${redaction_report}" \
@@ -92,6 +104,6 @@ write_text_file "${redaction_report}" \
     "" \
     "- Run ID: ${run_id}" \
     "- Status: passed" \
-    "- Scope: artifacts + run reports + acceptance reports"
+    "- Scope: artifacts + run reports + acceptance reports + review reports"
 
 printf 'Redaction check passed for run %s\n' "${run_id}"

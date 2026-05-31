@@ -1,0 +1,23 @@
+{
+  "suite": "semantic",
+  "gate_suite": "bus-release-closed-loop",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:32Z",
+  "finished_at": "2026-05-31T07:14:32Z",
+  "duration_ms": 32,
+  "case_ids": [
+    "TC-BUS-SEM-001",
+    "TC-BUS-SEM-002"
+  ],
+  "evidence_ids": [
+    "EV-BUS-SEM-001",
+    "EV-BUS-SEM-002"
+  ],
+  "commands": [
+    "cargo test -p bus-domain transport_semantic"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/semantic/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/semantic/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/semantic/report.json",
+  "failed_command": null
+}

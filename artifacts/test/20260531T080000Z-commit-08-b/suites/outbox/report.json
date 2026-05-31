@@ -1,0 +1,24 @@
+{
+  "suite": "outbox",
+  "gate_suite": "bus-release-closed-loop",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:32Z",
+  "finished_at": "2026-05-31T07:14:32Z",
+  "duration_ms": 314,
+  "case_ids": [
+    "TC-BUS-OBX-001",
+    "TC-BUS-OBX-002"
+  ],
+  "evidence_ids": [
+    "EV-BUS-OBX-001",
+    "EV-BUS-OBX-002"
+  ],
+  "commands": [
+    "cargo test -p bus-infra source::tests",
+    "cargo test -p bus-jobs outbox_relay_job_runner"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/outbox/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/outbox/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/outbox/report.json",
+  "failed_command": null
+}

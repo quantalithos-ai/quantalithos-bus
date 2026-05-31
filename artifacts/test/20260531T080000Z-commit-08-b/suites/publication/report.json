@@ -1,0 +1,31 @@
+{
+  "suite": "publication",
+  "gate_suite": "bus-release-closed-loop",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:28Z",
+  "finished_at": "2026-05-31T07:14:31Z",
+  "duration_ms": 3057,
+  "case_ids": [
+    "TC-BUS-PUB-001",
+    "TC-BUS-PUB-002",
+    "TC-BUS-PUB-003",
+    "TC-BUS-PUB-004"
+  ],
+  "evidence_ids": [
+    "EV-BUS-PUB-001",
+    "EV-BUS-PUB-002",
+    "EV-BUS-PUB-003",
+    "EV-BUS-PUB-004"
+  ],
+  "commands": [
+    "cargo fmt --all --check",
+    "cargo check --workspace",
+    "cargo test -p bus-contracts accept_publication",
+    "cargo test -p bus-domain publication::tests",
+    "cargo test -p bus-api accept_publication"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/publication/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/publication/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/publication/report.json",
+  "failed_command": null
+}

@@ -1,0 +1,26 @@
+{
+  "suite": "backend",
+  "gate_suite": "bus-release-closed-loop",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:32Z",
+  "finished_at": "2026-05-31T07:14:33Z",
+  "duration_ms": 64,
+  "case_ids": [
+    "TC-BUS-BND-001",
+    "TC-BUS-BND-002",
+    "TC-BUS-BND-003"
+  ],
+  "evidence_ids": [
+    "EV-BUS-BND-001",
+    "EV-BUS-BND-002",
+    "EV-BUS-BND-003"
+  ],
+  "commands": [
+    "cargo test -p bus-domain backend::tests",
+    "cargo test -p bus-application services::delivery::tests"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/backend/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/backend/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/backend/report.json",
+  "failed_command": null
+}

@@ -1,0 +1,28 @@
+{
+  "suite": "config",
+  "gate_suite": "bus-release-config-runtime",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:33Z",
+  "finished_at": "2026-05-31T07:14:33Z",
+  "duration_ms": 63,
+  "case_ids": [
+    "TC-BUS-CFG-001",
+    "TC-BUS-CFG-002",
+    "TC-BUS-CFG-003"
+  ],
+  "evidence_ids": [
+    "EV-BUS-CFG-001",
+    "EV-BUS-CFG-002",
+    "EV-BUS-CFG-003"
+  ],
+  "commands": [
+    "validate runtime config profile fixture",
+    "reject unsupported key and secret material fixtures",
+    "reject secret unavailable and reload request fixtures"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/config/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/config/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/config/report.json",
+  "failed_command": null,
+  "failure_reason": null
+}

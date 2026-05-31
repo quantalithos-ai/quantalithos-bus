@@ -1,0 +1,17 @@
+    Checking bus-domain v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/domain)
+    Checking bus-application v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/application)
+    Checking bus-jobs v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/jobs)
+    Checking bus-api v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/api)
+    Checking bus-worker v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/worker)
+    Checking bus-infra v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/infra)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.35s
+   Compiling bus-contracts v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/contracts)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.85s
+     Running unittests src/lib.rs (target/debug/deps/bus_contracts-a523fa032f3ceee8)
+   Compiling bus-domain v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/domain)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+     Running unittests src/lib.rs (target/debug/deps/bus_domain-bca8efd304aeb827)
+   Compiling bus-api v0.1.0 (/home/aris/Projects/quantalithos-bus/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/lib.rs (target/debug/deps/bus_api-214bfa9e5e73692c)
+     Running unittests src/bin/bus_api.rs (target/debug/deps/bus_api-652000814a84967f)

@@ -1,0 +1,21 @@
+{
+  "suite": "redaction",
+  "gate_suite": "bus-release-redaction",
+  "status": "passed",
+  "started_at": "2026-05-31T07:14:34Z",
+  "finished_at": "2026-05-31T07:14:34Z",
+  "duration_ms": 107,
+  "case_ids": [
+    "TC-BUS-RED-001"
+  ],
+  "evidence_ids": [
+    "RP-BUS-RED-001"
+  ],
+  "commands": [
+    "bash scripts/checks/check_redaction.sh --artifact-root artifacts/test/20260531T080000Z-commit-08-b --report-root reports"
+  ],
+  "stdout_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/redaction/stdout.log",
+  "stderr_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/redaction/stderr.log",
+  "report_path": "artifacts/test/20260531T080000Z-commit-08-b/suites/redaction/report.json",
+  "failed_command": null
+}

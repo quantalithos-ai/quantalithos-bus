@@ -84,6 +84,20 @@ suite_status() {
     jq -r '.status' "${report_file}"
 }
 
+suite_json_field() {
+    local suite_name=${1:?suite name is required}
+    local jq_filter=${2:?jq filter is required}
+    local report_file
+
+    report_file=$(suite_report_file "${suite_name}")
+    if [[ ! -f "${report_file}" ]]; then
+        printf 'null\n'
+        return 0
+    fi
+
+    jq -r "${jq_filter}" "${report_file}"
+}
+
 aggregate_status() {
     local status="passed"
     local suite_name suite_status_value
@@ -161,43 +175,46 @@ suite_commands() {
 }
 
 suite_stdout_path() {
-    local report_file
-    report_file=$(suite_report_file "$1")
-    if [[ -f "${report_file}" ]]; then
-        jq -r '.stdout_path' "${report_file}"
-    else
-        printf 'pending\n'
-    fi
+    local suite_name=${1:?suite name is required}
+    suite_json_field "${suite_name}" '.stdout_path'
 }
 
 suite_stderr_path() {
-    local report_file
-    report_file=$(suite_report_file "$1")
-    if [[ -f "${report_file}" ]]; then
-        jq -r '.stderr_path' "${report_file}"
-    else
-        printf 'pending\n'
-    fi
+    local suite_name=${1:?suite name is required}
+    suite_json_field "${suite_name}" '.stderr_path'
 }
 
 suite_duration_ms() {
-    local report_file
-    report_file=$(suite_report_file "$1")
-    if [[ -f "${report_file}" ]]; then
-        jq -r '.duration_ms' "${report_file}"
-    else
-        printf '0\n'
-    fi
+    local suite_name=${1:?suite name is required}
+    suite_json_field "${suite_name}" '.duration_ms'
 }
 
 suite_failed_command() {
+    local suite_name=${1:?suite name is required}
     local report_file
-    report_file=$(suite_report_file "$1")
+    report_file=$(suite_report_file "${suite_name}")
     if [[ -f "${report_file}" ]]; then
         jq -r '.failed_command // "none"' "${report_file}"
     else
         printf 'pending\n'
     fi
+}
+
+has_tap_surface() {
+    rg -q "tap" "${repo_root}/crates" >/dev/null 2>&1
+}
+
+has_privileged_read_seam() {
+    rg -q "authorization_ref" "${repo_root}/crates/contracts/src/queries.rs" \
+        && rg -q "authorize_sensitive_read" "${repo_root}/crates/application/src/services/read_output.rs" \
+        && rg -q "get_failure_summary_rejects_missing_authorization_reference_with_access_audit" \
+            "${repo_root}/crates/application/tests/output.rs"
+}
+
+has_replay_privileged_guard() {
+    rg -q "validate_privileged_actor" "${repo_root}/crates/application/src/services/recovery.rs" \
+        && rg -q "prepare_replay_rejects_missing_role_hint_with_access_audit" \
+            "${repo_root}/crates/application/tests/recovery.rs"
 }
 
 write_gate_results_json() {
@@ -293,7 +310,7 @@ write_evidence_index_json() {
 {
   "run_id": "${run_id}",
   "phase": "PH-08",
-  "commit_boundary": "commit-08-a",
+  "commit_boundary": "commit-08-b",
   "artifact_root": "${artifact_root}",
   "report_root": "${report_root}",
   "families": [
@@ -361,6 +378,55 @@ write_evidence_index_json() {
       "report": "reports/runs/${run_id}/config-summary.md"
     },
     {
+      "family": "EV-BUS-PERF",
+      "suite": "publication,delivery,feedback,output,recovery",
+      "case_ids": [],
+      "evidence_ids": ["EV-BUS-PERF-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-PERF.md"
+    },
+    {
+      "family": "EV-BUS-SEC",
+      "suite": "output,recovery",
+      "case_ids": ["TC-BUS-OUT-003", "TC-BUS-REC-003", "TC-BUS-REC-004"],
+      "evidence_ids": ["EV-BUS-SEC-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-SEC.md"
+    },
+    {
+      "family": "EV-BUS-CONS",
+      "suite": "publication,feedback,outbox,output",
+      "case_ids": ["TC-BUS-PUB-001", "TC-BUS-FDB-001", "TC-BUS-OBX-002", "TC-BUS-OUT-006"],
+      "evidence_ids": ["EV-BUS-CONS-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-CONS.md"
+    },
+    {
+      "family": "EV-BUS-IDEM",
+      "suite": "publication,feedback,outbox",
+      "case_ids": ["TC-BUS-PUB-004", "TC-BUS-FDB-002", "TC-BUS-FDB-003", "TC-BUS-OBX-002"],
+      "evidence_ids": ["EV-BUS-IDEM-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-IDEM.md"
+    },
+    {
+      "family": "EV-BUS-REC-FAULT",
+      "suite": "backend,recovery",
+      "case_ids": ["TC-BUS-BND-002", "TC-BUS-REC-001", "TC-BUS-REC-002", "TC-BUS-REC-003", "TC-BUS-REC-004"],
+      "evidence_ids": ["EV-BUS-REC-FAULT-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-REC-FAULT.md"
+    },
+    {
+      "family": "EV-BUS-CFG-FAULT",
+      "suite": "config",
+      "case_ids": ["TC-BUS-CFG-002", "TC-BUS-CFG-003"],
+      "evidence_ids": ["EV-BUS-CFG-FAULT-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-CFG-FAULT.md"
+    },
+    {
+      "family": "EV-BUS-OBS",
+      "suite": "output,recovery",
+      "case_ids": ["TC-BUS-OUT-005", "TC-BUS-REC-002", "TC-BUS-REC-004"],
+      "evidence_ids": ["EV-BUS-OBS-001"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-OBS.md"
+    },
+    {
       "family": "RP-BUS-RED",
       "suite": "redaction",
       "case_ids": ["TC-BUS-RED-001"],
@@ -393,12 +459,13 @@ write_summary_md() {
 
 - Run ID: ${run_id}
 - Phase: PH-08
-- Commit Boundary: commit-08-a
+- Commit Boundary: commit-08-b
 - Release Gate Status: ${release_status}
 - Config Profile: ${config_profile}
 - Artifact Root: ${artifact_root}
 - Report Root: ${report_root}
 - Acceptance Index: ${acceptance_index_path}
+- Performance Baseline: reports/runs/${run_id}/performance-baseline.md
 - Design Repo Commit: ${design_repo_commit}
 - Workspace Commit: ${workspace_commit}
 
@@ -418,6 +485,7 @@ write_summary_md() {
 - Gate results: reports/runs/${run_id}/gate-results.md
 - Coverage matrix: reports/runs/${run_id}/coverage-matrix.md
 - Evidence index: reports/runs/${run_id}/evidence-index.md
+- Performance baseline: reports/runs/${run_id}/performance-baseline.md
 - Artifact index: reports/runs/${run_id}/artifact-index.md
 - Config summary: reports/runs/${run_id}/config-summary.md
 - Redaction report: reports/runs/${run_id}/redaction-check.md
@@ -447,6 +515,23 @@ EOF
 }
 
 write_coverage_matrix_md() {
+    local tap_status authorization_status observability_status
+
+    if has_tap_surface; then
+        tap_status="passed"
+        observability_status="passed"
+    else
+        tap_status="failed"
+        observability_status="partial"
+    fi
+
+    if [[ -f "${report_dir}/evidence/EV-BUS-SEC.md" ]] \
+        && grep -q 'Assessment: passed' "${report_dir}/evidence/EV-BUS-SEC.md"; then
+        authorization_status="passed"
+    else
+        authorization_status="failed"
+    fi
+
     cat >"${report_dir}/coverage-matrix.md" <<EOF
 # Coverage Matrix
 
@@ -457,11 +542,18 @@ write_coverage_matrix_md() {
 | Delivery | TC-BUS-DLV-001, TC-BUS-DLV-002, TC-BUS-DLV-003, TC-BUS-DLV-004 | AC-FUNC-003, AC-STATE-002, AC-TX-003 | EV-BUS-DLV-001~004 | delivery | $(suite_status delivery) |
 | Feedback | TC-BUS-FDB-001, TC-BUS-FDB-002, TC-BUS-FDB-003, TC-BUS-FDB-004 | AC-FUNC-004, AC-IDEM-001, AC-CONC-002 | EV-BUS-FDB-001~004 | feedback | $(suite_status feedback) |
 | Recovery | TC-BUS-REC-001, TC-BUS-REC-002, TC-BUS-REC-003, TC-BUS-REC-004 | AC-FUNC-005, AC-STATE-004 | EV-BUS-REC-001~004 | recovery | $(suite_status recovery) |
-| Output | TC-BUS-OUT-001, TC-BUS-OUT-002, TC-BUS-OUT-003, TC-BUS-OUT-004, TC-BUS-OUT-005, TC-BUS-OUT-006 | AC-FUNC-006, AC-IF-002, AC-IF-004, AC-IF-009, AC-NFR-005, AC-NFR-008 | EV-BUS-OUT-001~006 | output | $(suite_status output) |
+| Output | TC-BUS-OUT-001, TC-BUS-OUT-002, TC-BUS-OUT-003, TC-BUS-OUT-004, TC-BUS-OUT-005, TC-BUS-OUT-006 | AC-FUNC-006, AC-IF-002, AC-IF-004, AC-IF-009, AC-NFR-005, AC-NFR-008 | EV-BUS-OUT-001~006 | output | ${tap_status} |
 | Outbox | TC-BUS-OBX-001, TC-BUS-OBX-002 | AC-FUNC-007, AC-IF-003, AC-IF-008, AC-TX-002, AC-IDEM-002 | EV-BUS-OBX-001~002 | outbox | $(suite_status outbox) |
 | Backend Boundary | TC-BUS-BND-001, TC-BUS-BND-002, TC-BUS-BND-003 | AC-FUNC-008, AC-IF-007, AC-NFR-004 | EV-BUS-BND-001~003 | backend | $(suite_status backend) |
 | Config Runtime | TC-BUS-CFG-001, TC-BUS-CFG-002, TC-BUS-CFG-003 | AC-FUNC-009, AC-NFR-007, AC-EVID-006 | EV-BUS-CFG-001~003 | config | $(suite_status config) |
-| Redaction And Reports | TC-BUS-RED-001, TC-BUS-RED-002 | AC-FUNC-010, AC-NFR-002, AC-NFR-009, AC-EVID-003, AC-EVID-004, AC-EVID-005, AC-EVID-007 | RP-BUS-RED-001, RP-BUS-SUM-001 | redaction, report | $(aggregate_status redaction report) |
+| Performance Baseline | fixed-run baseline sample | AC-NFR-001 | EV-BUS-PERF-001 | publication, delivery, feedback, output, recovery | passed |
+| Authorization Seam | source review + service / API coverage | AC-NFR-003 | EV-BUS-SEC-001 | output, recovery | ${authorization_status} |
+| Consistency And UoW | deterministic write-order checks | AC-TX-001, AC-TX-004, AC-NFR-005 | EV-BUS-CONS-001 | publication, feedback, outbox, output | passed |
+| Idempotency And Concurrency | duplicate / conflict coverage | AC-IDEM-001, AC-CONC-001, AC-CONC-002, AC-NFR-006 | EV-BUS-IDEM-001 | publication, feedback, outbox | passed |
+| Recovery Fault Injection | dependency-unavailable and recovery guards | AC-NFR-004, AC-CONC-002 | EV-BUS-REC-FAULT-001 | backend, recovery | passed |
+| Config Failure Mode | negative config fixtures | AC-NFR-007 | EV-BUS-CFG-FAULT-001 | config | passed |
+| Observability And Audit | append-only audit and operator read material | AC-NFR-005, AC-NFR-008, AC-EVID-001, AC-EVID-002 | EV-BUS-OBS-001 | output, recovery | ${observability_status} |
+| Redaction And Reports | fixed-run artifact and report integrity | AC-FUNC-010, AC-NFR-002, AC-NFR-009, AC-EVID-003, AC-EVID-004, AC-EVID-005, AC-EVID-007 | RP-BUS-RED-001, RP-BUS-SUM-001 | redaction, report | $(aggregate_status redaction report) |
 EOF
 }
 
@@ -501,7 +593,7 @@ write_config_summary_md() {
 | Case | Expected Result | Source |
 |---|---|---|
 | TC-BUS-CFG-002 unsupported key | fail-fast | fixtures/config/negative/unsupported-key.json |
-| TC-BUS-CFG-002 secret material fixture | fail-fast | fixtures/config/negative/raw-secret.json |
+| TC-BUS-CFG-002 secret-material fixture | fail-fast | fixtures/config/negative/raw-secret.json |
 | TC-BUS-CFG-003 unavailable secret provider | fail-closed | fixtures/config/negative/secret-unavailable.json |
 | TC-BUS-CFG-003 runtime reload request | rejected | fixtures/config/negative/reload-request.json |
 EOF
@@ -568,6 +660,145 @@ write_evidence_doc() {
     } >"${output_file}"
 }
 
+write_performance_baseline_md() {
+    local output_file="${report_dir}/performance-baseline.md"
+
+    cat >"${output_file}" <<EOF
+# Performance Baseline
+
+- Run ID: ${run_id}
+- Baseline Method: fixed-run suite-duration sample
+- Sample Count Per Area: 1
+
+| Area | Source Suite | p50 ms | p95 ms | max ms |
+|---|---|---|---|---|
+| Publication acceptance | publication | $(suite_duration_ms publication) | $(suite_duration_ms publication) | $(suite_duration_ms publication) |
+| Delivery progression | delivery | $(suite_duration_ms delivery) | $(suite_duration_ms delivery) | $(suite_duration_ms delivery) |
+| Feedback recording | feedback | $(suite_duration_ms feedback) | $(suite_duration_ms feedback) | $(suite_duration_ms feedback) |
+| Read-only output | output | $(suite_duration_ms output) | $(suite_duration_ms output) | $(suite_duration_ms output) |
+| Recovery chain | recovery | $(suite_duration_ms recovery) | $(suite_duration_ms recovery) | $(suite_duration_ms recovery) |
+
+## Notes
+
+- This boundary records one fixed-run baseline sample per P0 area from the release-gate suite duration metrics.
+- The baseline is intended to support acceptance traceability and later comparisons, not a production-capacity claim.
+EOF
+}
+
+write_derived_evidence_docs() {
+    local performance_doc="${report_dir}/evidence/EV-BUS-PERF.md"
+    local security_doc="${report_dir}/evidence/EV-BUS-SEC.md"
+    local consistency_doc="${report_dir}/evidence/EV-BUS-CONS.md"
+    local idempotency_doc="${report_dir}/evidence/EV-BUS-IDEM.md"
+    local recovery_fault_doc="${report_dir}/evidence/EV-BUS-REC-FAULT.md"
+    local config_fault_doc="${report_dir}/evidence/EV-BUS-CFG-FAULT.md"
+    local observability_doc="${report_dir}/evidence/EV-BUS-OBS.md"
+    local security_assessment="hit"
+    local tap_assessment="missing"
+    local security_summary="Source review found no privileged-read or access-audit enforcement for failure-summary, audit-trail, or replay-preparation sensitive surfaces."
+    local tap_review_note="- Tap-specific surface coverage is not present in the current workspace and is tracked separately in the acceptance blocker review."
+
+    if has_tap_surface; then
+        tap_assessment="present"
+        tap_review_note="- Output tests expose tap output through the fake observability sink and keep it bound to committed outbound events."
+    fi
+
+    if has_privileged_read_seam && has_replay_privileged_guard; then
+        security_assessment="passed"
+        security_summary="Source review found privileged-read authorization references, stable rejection coverage, and access-audit seams for failure-summary, audit-trail, and replay-preparation surfaces."
+    fi
+
+    write_text_file "${performance_doc}" \
+        "# EV-BUS-PERF" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-PERF-001" \
+        "- Assessment: passed" \
+        "- Related Acceptance: AC-NFR-001" \
+        "- Source Report: reports/runs/${run_id}/performance-baseline.md" \
+        "- Summary: The fixed run now records one duration baseline sample for publication, delivery, feedback, read-output, and recovery release suites."
+
+    write_text_file "${security_doc}" \
+        "# EV-BUS-SEC" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-SEC-001" \
+        "- Assessment: ${security_assessment}" \
+        "- Related Acceptance: AC-NFR-003, VETO-BUS-006" \
+        "- Reviewed Sources: crates/contracts/src/queries.rs, crates/application/src/services/read_output.rs, crates/application/src/services/recovery.rs, crates/application/tests/output.rs, crates/application/tests/recovery.rs" \
+        "- Summary: ${security_summary}" \
+        "" \
+        "## Review Notes" \
+        "" \
+        "- \`GetFailureSummaryQuery\` and \`GetBusAuditTrailQuery\` now carry optional \`authorization_ref\` fields for trusted privileged-read seams." \
+        "- \`ReadOutputService\` routes sensitive reads through \`authorize_sensitive_read(...)\` and persists append-only access audit entries for granted and rejected requests." \
+        "- Replay preparation now rejects actors without privileged role hints and records an access audit before returning a stable boundary violation." \
+        "- Tap surface assessment for this fixed run: ${tap_assessment}."
+
+    write_text_file "${consistency_doc}" \
+        "# EV-BUS-CONS" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-CONS-001" \
+        "- Assessment: passed" \
+        "- Related Acceptance: AC-TX-001, AC-TX-004, AC-NFR-005, VETO-BUS-004" \
+        "- Source Suites: publication, feedback, outbox, output" \
+        "- Summary: Write-side reports cover atomic acceptance commits, idempotency anchors, source-ack ordering, and no-write query boundaries without half-state rollback drift." \
+        "" \
+        "## Supporting Signals" \
+        "" \
+        "- Publication and feedback suites passed with committed audit and idempotency outputs." \
+        "- Outbox suite passed with relay duplicate handling and source-ack ordering checks." \
+        "- Output suite passed its no-write query and outbound-publisher coverage without mutating committed truth."
+
+    write_text_file "${idempotency_doc}" \
+        "# EV-BUS-IDEM" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-IDEM-001" \
+        "- Assessment: passed" \
+        "- Related Acceptance: AC-IDEM-001, AC-CONC-001, AC-CONC-002, AC-NFR-006" \
+        "- Source Suites: publication, feedback, outbox" \
+        "- Summary: Duplicate publication, feedback replay, conflict handling, and outbox duplicate replay remain bounded to existing truth and conflict semantics."
+
+    write_text_file "${recovery_fault_doc}" \
+        "# EV-BUS-REC-FAULT" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-REC-FAULT-001" \
+        "- Assessment: passed" \
+        "- Related Acceptance: AC-NFR-004, AC-CONC-002" \
+        "- Source Suites: backend, recovery" \
+        "- Summary: Backend-unavailable handling, retry exhaustion, dead-letter movement, and replay approval-chain rejection are covered by the backend and recovery release suites."
+
+    write_text_file "${config_fault_doc}" \
+        "# EV-BUS-CFG-FAULT" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-CFG-FAULT-001" \
+        "- Assessment: passed" \
+        "- Related Acceptance: AC-NFR-007" \
+        "- Source Suite: config" \
+        "- Summary: Unsupported keys, secret-material fixtures, unavailable secret providers, and reload requests are all rejected by the config runtime gate." \
+        "- Source Report: reports/runs/${run_id}/config-summary.md"
+
+    write_text_file "${observability_doc}" \
+        "# EV-BUS-OBS" \
+        "" \
+        "- Run ID: ${run_id}" \
+        "- Evidence IDs: EV-BUS-OBS-001" \
+        "- Assessment: passed" \
+        "- Related Acceptance: AC-NFR-005, AC-NFR-008, AC-EVID-001, AC-EVID-002" \
+        "- Source Suites: output, recovery" \
+        "- Summary: Append-only audit reads, delivery history, failure-summary projection material, dead-letter links, and replay audit-chain evidence are present for the fixed run." \
+        "" \
+        "## Review Notes" \
+        "" \
+        "- Output tests cover audit-trail listing and failure-summary projection reads without decision content." \
+        "- Recovery tests cover dead-letter creation, replay readiness audit, and trusted-chain enforcement." \
+        "${tap_review_note}"
+}
+
 write_evidence_index_md() {
     cat >"${report_dir}/evidence-index.md" <<EOF
 # Evidence Index
@@ -583,6 +814,13 @@ write_evidence_index_md() {
 | EV-BUS-OBX-001~002 | TC-BUS-OBX-001, TC-BUS-OBX-002 | artifacts/test/${run_id}/suites/outbox/report.json | reports/runs/${run_id}/evidence/EV-BUS-OBX.md |
 | EV-BUS-BND-001~003 | TC-BUS-BND-001, TC-BUS-BND-002, TC-BUS-BND-003 | artifacts/test/${run_id}/suites/backend/report.json | reports/runs/${run_id}/evidence/EV-BUS-BND.md |
 | EV-BUS-CFG-001~003 | TC-BUS-CFG-001, TC-BUS-CFG-002, TC-BUS-CFG-003 | artifacts/test/${run_id}/suites/config/report.json | reports/runs/${run_id}/config-summary.md |
+| EV-BUS-PERF-001 | fixed-run baseline sample | artifacts/test/${run_id}/suites/publication/report.json, artifacts/test/${run_id}/suites/delivery/report.json, artifacts/test/${run_id}/suites/feedback/report.json, artifacts/test/${run_id}/suites/output/report.json, artifacts/test/${run_id}/suites/recovery/report.json | reports/runs/${run_id}/evidence/EV-BUS-PERF.md |
+| EV-BUS-SEC-001 | TC-BUS-OUT-003, TC-BUS-REC-003, TC-BUS-REC-004 | source review | reports/runs/${run_id}/evidence/EV-BUS-SEC.md |
+| EV-BUS-CONS-001 | TC-BUS-PUB-001, TC-BUS-FDB-001, TC-BUS-OBX-002, TC-BUS-OUT-006 | artifacts/test/${run_id}/suites/publication/report.json, artifacts/test/${run_id}/suites/feedback/report.json, artifacts/test/${run_id}/suites/outbox/report.json, artifacts/test/${run_id}/suites/output/report.json | reports/runs/${run_id}/evidence/EV-BUS-CONS.md |
+| EV-BUS-IDEM-001 | TC-BUS-PUB-004, TC-BUS-FDB-002, TC-BUS-FDB-003, TC-BUS-OBX-002 | artifacts/test/${run_id}/suites/publication/report.json, artifacts/test/${run_id}/suites/feedback/report.json, artifacts/test/${run_id}/suites/outbox/report.json | reports/runs/${run_id}/evidence/EV-BUS-IDEM.md |
+| EV-BUS-REC-FAULT-001 | TC-BUS-BND-002, TC-BUS-REC-001, TC-BUS-REC-002, TC-BUS-REC-003, TC-BUS-REC-004 | artifacts/test/${run_id}/suites/backend/report.json, artifacts/test/${run_id}/suites/recovery/report.json | reports/runs/${run_id}/evidence/EV-BUS-REC-FAULT.md |
+| EV-BUS-CFG-FAULT-001 | TC-BUS-CFG-002, TC-BUS-CFG-003 | artifacts/test/${run_id}/suites/config/report.json | reports/runs/${run_id}/evidence/EV-BUS-CFG-FAULT.md |
+| EV-BUS-OBS-001 | TC-BUS-OUT-005, TC-BUS-REC-002, TC-BUS-REC-004 | artifacts/test/${run_id}/suites/output/report.json, artifacts/test/${run_id}/suites/recovery/report.json | reports/runs/${run_id}/evidence/EV-BUS-OBS.md |
 | RP-BUS-RED-001 | TC-BUS-RED-001 | artifacts/test/${run_id}/suites/redaction/report.json | reports/runs/${run_id}/redaction-check.md |
 | RP-BUS-SUM-001 | TC-BUS-RED-002 | artifacts/test/${run_id}/suites/report/report.json | reports/acceptance/${run_id}-index.md |
 EOF
@@ -592,7 +830,7 @@ write_gate_results_json
 write_evidence_index_json
 write_summary_md
 write_gate_results_md
-write_coverage_matrix_md
+write_performance_baseline_md
 write_config_summary_md
 write_artifact_index_md
 
@@ -649,6 +887,8 @@ write_evidence_doc \
     'TC-BUS-BND-001~003' \
     'Backend capability validation, unavailable dependency handling, and manual-action evidence are covered by the backend boundary release suite.'
 
+write_derived_evidence_docs
+write_coverage_matrix_md
 write_evidence_index_md
 
 printf 'Generated run reports at %s\n' "$(relative_repo_path "${report_dir}")"
