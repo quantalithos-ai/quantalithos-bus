@@ -1,11 +1,17 @@
 //! Minimal command APIs for publication acceptance and delivery feedback.
 
+mod query;
+
 use bus_application::{
     ApplicationError, DeliveryFeedbackUseCase, ProtocolErrorCategory, PublicationAcceptanceUseCase,
 };
 use bus_contracts::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
-use bus_contracts::metadata::{ActorContext, CommandMetadata, RequestId, TraceContextRef};
+use bus_contracts::metadata::{
+    ActorContext, CommandMetadata, RequestId, RequestMetadata, TraceContextRef,
+};
 use bus_contracts::receipts::{FeedbackRecordResult, PublicationAcceptanceResult};
+
+pub use query::BusQueryApi;
 
 /// A stable API error envelope.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -29,6 +35,10 @@ pub struct ApiError {
 impl ApiError {
     /// Maps an application error into the API envelope.
     pub fn from_application(error: ApplicationError, meta: &CommandMetadata) -> Self {
+        Self::from_request(error, &meta.request)
+    }
+
+    pub(crate) fn from_request(error: ApplicationError, request: &RequestMetadata) -> Self {
         let status_code = match error.category() {
             ProtocolErrorCategory::Validation => 400,
             ProtocolErrorCategory::NotFound => 404,
@@ -42,8 +52,8 @@ impl ApiError {
             status_code,
             code: error.code().to_owned(),
             message: error.message().to_owned(),
-            request_id: meta.request.request_id.clone(),
-            trace_id: meta.request.trace_id.clone(),
+            request_id: request.request_id.clone(),
+            trace_id: request.trace_id.clone(),
             retryable: error.retryable(),
             details_ref: error.details_ref().map(ToOwned::to_owned),
         }

@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running tests/output.rs (target/debug/deps/output-e53ea9845ebf1eae)
+
+running 3 tests
+test get_transport_view_missing_projection_returns_not_found ... ok
+test get_transport_view_returns_committed_projection_without_writes ... ok
+test get_transport_view_returns_stale_marker_without_rebuild ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

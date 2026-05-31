@@ -5,21 +5,26 @@ use std::sync::{Arc, Mutex};
 
 use bus_application::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, DeliveryRepository,
-    FeedbackRepository, IdempotencyRepository, PublicationRepository, RecoveryRepository,
-    RepositoryError, TransportBackendPort, TransportPortError, UnitOfWorkHandle,
+    FeedbackRepository, IdempotencyRepository, PublicationRepository, ReadProjectionRepository,
+    RecoveryRepository, RepositoryError, TransportBackendPort, TransportPortError,
+    UnitOfWorkHandle,
 };
 use bus_contracts::events::BackendDeliverySignalInput;
 use bus_contracts::metadata::{
-    AuditChainRef, BackendCapabilityRef, BackendDeliveryRef, BackendStatus, DeadLetterId,
-    DeliveryId, DeliveryScanCursor, FailureMaterialId, FeedbackId, IdempotencyKey, PageLimit,
-    PublicationId, ReplayPreparationId, RetryPlanId, RetryScanCursor, Timestamp, Version,
+    AuditChainRef, BackendCapabilityRef, BackendDeliveryRef, BackendId, BackendStatus,
+    DeadLetterId, DeliveryId, DeliveryScanCursor, FailureMaterialId, FailureSummaryId, FeedbackId,
+    IdempotencyKey, PageLimit, PageRequest, PublicationId, ReplayPreparationId, RetryPlanId,
+    RetryScanCursor, Timestamp, TransportViewId, Version,
 };
+use bus_contracts::queries::AuditFilter;
+use bus_contracts::views::{BackendHealthView, BusAuditTrailItemView, BusAuditTrailView};
 use bus_domain::audit::{AuditChain, BusAuditEntry};
 use bus_domain::backend::BackendCapabilityPolicy;
 use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
 use bus_domain::feedback::FeedbackResult;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
-use bus_domain::publication::PublicationAcceptance;
+use bus_domain::publication::{PublicationAcceptance, PublicationMaterial};
+use bus_domain::read_output::{FailureSummaryProjection, TransportViewProjection};
 use bus_domain::recovery::{DeadLetterEntry, FailureMaterial, ReplayPreparation, RetryPlan};
 
 use crate::store::SharedMemoryStore;
@@ -43,6 +48,15 @@ impl InMemoryPublicationRepository {
 }
 
 impl PublicationRepository for InMemoryPublicationRepository {
+    async fn store_material(
+        &self,
+        material: PublicationMaterial,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<(), RepositoryError> {
+        self.store
+            .stage_publication_material(uow.transaction_id, material)
+    }
+
     async fn insert(
         &self,
         acceptance: PublicationAcceptance,
@@ -56,6 +70,13 @@ impl PublicationRepository for InMemoryPublicationRepository {
         publication_id: &PublicationId,
     ) -> Result<Option<PublicationAcceptance>, RepositoryError> {
         Ok(self.store.publication(publication_id))
+    }
+
+    async fn get_material(
+        &self,
+        publication_id: &PublicationId,
+    ) -> Result<Option<PublicationMaterial>, RepositoryError> {
+        Ok(self.store.publication_material(publication_id))
     }
 }
 
@@ -164,6 +185,51 @@ impl AuditTrailRepository for InMemoryAuditTrailRepository {
         self.store.stage_audit_entry(uow.transaction_id, entry)
     }
 
+    async fn list(
+        &self,
+        filter: AuditFilter,
+        page: PageRequest,
+    ) -> Result<BusAuditTrailView, RepositoryError> {
+        let offset = page
+            .page_token
+            .as_ref()
+            .and_then(|token| token.as_str().parse::<usize>().ok())
+            .unwrap_or(0);
+        let limit = usize::try_from(page.limit).unwrap_or(usize::MAX);
+        let entries = self.store.audit_entries();
+        let filtered = entries
+            .into_iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                filter
+                    .record_ref
+                    .as_ref()
+                    .is_none_or(|record_ref| entry.subject_ref.record_ref() == *record_ref)
+                    && filter
+                        .event_kind
+                        .as_ref()
+                        .is_none_or(|event_kind| entry.action.event_kind() == *event_kind)
+            })
+            .collect::<Vec<_>>();
+        let items = filtered
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(index, entry)| BusAuditTrailItemView {
+                audit_ref: entry.audit_ref.clone(),
+                audit_sequence: (*index as u64) + 1,
+                record_ref: entry.subject_ref.record_ref(),
+                event_kind: entry.action.event_kind(),
+                actor_ref: entry.actor.actor_ref().clone(),
+                occurred_at: entry.occurred_at.clone(),
+            })
+            .collect::<Vec<_>>();
+        let next_cursor = (offset + items.len() < filtered.len())
+            .then(|| bus_contracts::metadata::PageToken::new((offset + items.len()).to_string()));
+
+        Ok(BusAuditTrailView { items, next_cursor })
+    }
+
     async fn load_chain(&self, chain_ref: &AuditChainRef) -> Result<AuditChain, RepositoryError> {
         Ok(self.store.audit_chain(chain_ref))
     }
@@ -207,6 +273,27 @@ impl FeedbackRepository for InMemoryFeedbackRepository {
     ) -> Result<Option<FeedbackResult>, RepositoryError> {
         Ok(self.store.feedback(feedback_id))
     }
+
+    async fn find_by_delivery(
+        &self,
+        delivery_id: &DeliveryId,
+        page: PageRequest,
+    ) -> Result<Vec<FeedbackResult>, RepositoryError> {
+        let offset = page
+            .page_token
+            .as_ref()
+            .and_then(|token| token.as_str().parse::<usize>().ok())
+            .unwrap_or(0);
+        let limit = usize::try_from(page.limit).unwrap_or(usize::MAX);
+
+        Ok(self
+            .store
+            .feedbacks_by_delivery(delivery_id)
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect())
+    }
 }
 
 /// In-memory delivery repository.
@@ -233,6 +320,13 @@ impl InMemoryDeliveryRepository {
 }
 
 impl DeliveryRepository for InMemoryDeliveryRepository {
+    async fn get(
+        &self,
+        delivery_id: &DeliveryId,
+    ) -> Result<Option<DeliveryRecord>, RepositoryError> {
+        Ok(self.store.delivery(delivery_id))
+    }
+
     async fn get_for_update(
         &self,
         delivery_id: &DeliveryId,
@@ -268,6 +362,93 @@ impl DeliveryRepository for InMemoryDeliveryRepository {
             .delivery(delivery_id)
             .map(|delivery| delivery.history().to_vec())
             .unwrap_or_default())
+    }
+}
+
+/// In-memory read-projection repository.
+#[derive(Clone)]
+pub struct InMemoryReadProjectionRepository {
+    store: SharedMemoryStore,
+}
+
+impl InMemoryReadProjectionRepository {
+    /// Creates a new repository over the shared memory store.
+    pub fn new(store: SharedMemoryStore) -> Self {
+        Self { store }
+    }
+
+    /// Seeds a committed transport-view projection for tests.
+    pub fn seed_transport_view_projection(
+        &self,
+        projection: TransportViewProjection,
+    ) -> Result<bus_contracts::metadata::ProjectionVersion, RepositoryError> {
+        self.store.seed_transport_view_projection(projection)
+    }
+
+    /// Seeds a committed failure-summary projection for tests.
+    pub fn seed_failure_summary_projection(
+        &self,
+        projection: FailureSummaryProjection,
+    ) -> Result<bus_contracts::metadata::ProjectionVersion, RepositoryError> {
+        self.store.seed_failure_summary_projection(projection)
+    }
+
+    /// Seeds a committed backend-health view for tests.
+    pub fn seed_backend_health_view(
+        &self,
+        view: BackendHealthView,
+    ) -> Result<bus_contracts::metadata::ProjectionVersion, RepositoryError> {
+        self.store.seed_backend_health_view(view)
+    }
+}
+
+impl ReadProjectionRepository for InMemoryReadProjectionRepository {
+    async fn upsert_transport_view(
+        &self,
+        projection: TransportViewProjection,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<bus_contracts::metadata::ProjectionVersion, RepositoryError> {
+        self.store
+            .stage_transport_view_projection(uow.transaction_id, projection)
+    }
+
+    async fn upsert_failure_summary(
+        &self,
+        projection: FailureSummaryProjection,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<bus_contracts::metadata::ProjectionVersion, RepositoryError> {
+        self.store
+            .stage_failure_summary_projection(uow.transaction_id, projection)
+    }
+
+    async fn upsert_backend_health(
+        &self,
+        view: BackendHealthView,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<bus_contracts::metadata::ProjectionVersion, RepositoryError> {
+        self.store
+            .stage_backend_health_view(uow.transaction_id, view)
+    }
+
+    async fn get_transport_view_projection(
+        &self,
+        transport_view_id: &TransportViewId,
+    ) -> Result<Option<TransportViewProjection>, RepositoryError> {
+        Ok(self.store.transport_view_projection(transport_view_id))
+    }
+
+    async fn get_failure_summary_projection(
+        &self,
+        failure_summary_id: &FailureSummaryId,
+    ) -> Result<Option<FailureSummaryProjection>, RepositoryError> {
+        Ok(self.store.failure_summary_projection(failure_summary_id))
+    }
+
+    async fn get_backend_health_view(
+        &self,
+        backend_id: &BackendId,
+    ) -> Result<Option<BackendHealthView>, RepositoryError> {
+        Ok(self.store.backend_health_view(backend_id))
     }
 }
 

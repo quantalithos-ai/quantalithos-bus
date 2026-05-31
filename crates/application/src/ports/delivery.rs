@@ -8,6 +8,12 @@ use crate::ports::UnitOfWorkHandle;
 
 /// Repository port for bus-owned delivery truth.
 pub trait DeliveryRepository: Send + Sync {
+    /// Loads one committed delivery aggregate for read-only queries.
+    async fn get(
+        &self,
+        delivery_id: &DeliveryId,
+    ) -> Result<Option<DeliveryRecord>, RepositoryError>;
+
     /// Locks and loads a delivery inside a write transaction.
     async fn get_for_update(
         &self,

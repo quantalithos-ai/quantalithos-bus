@@ -278,6 +278,7 @@ where
     async fn commit_publication_decision(
         &self,
         purpose: UnitOfWorkPurpose,
+        material: PublicationMaterial,
         mut acceptance: PublicationAcceptance,
         actor: ActorContext,
         trace_ref: TraceContextRef,
@@ -328,6 +329,16 @@ where
             trace_ref,
         );
 
+        if let Err(error) = self
+            .deps
+            .publication_repository
+            .store_material(material, &handle)
+            .await
+        {
+            return self
+                .rollback_with(handle, ApplicationError::from(error))
+                .await;
+        }
         if let Err(error) = self
             .deps
             .publication_repository
@@ -427,6 +438,7 @@ where
             let result = self
                 .commit_publication_decision(
                     UnitOfWorkPurpose::AcceptPublication,
+                    material.clone(),
                     acceptance,
                     actor,
                     meta.request.trace_id,
@@ -439,10 +451,11 @@ where
             return Err(Self::validation_error_from_rejected_result(&result));
         }
 
-        if self.payload_guard.rejects_body(material) {
+        if self.payload_guard.rejects_body(material.clone()) {
             let result = self
                 .commit_publication_decision(
                     UnitOfWorkPurpose::AcceptPublication,
+                    material.clone(),
                     acceptance,
                     actor,
                     meta.request.trace_id,
@@ -457,6 +470,7 @@ where
 
         self.commit_publication_decision(
             UnitOfWorkPurpose::AcceptPublication,
+            material,
             acceptance,
             actor,
             meta.request.trace_id,
@@ -527,6 +541,7 @@ where
             let result = self
                 .commit_publication_decision(
                     UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                    material.clone(),
                     acceptance,
                     actor,
                     meta.trace_ref,
@@ -539,10 +554,11 @@ where
             return Err(Self::validation_error_from_rejected_result(&result));
         }
 
-        if self.payload_guard.rejects_body(material) {
+        if self.payload_guard.rejects_body(material.clone()) {
             let result = self
                 .commit_publication_decision(
                     UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                    material.clone(),
                     acceptance,
                     actor,
                     meta.trace_ref,
@@ -558,6 +574,7 @@ where
         let result = self
             .commit_publication_decision(
                 UnitOfWorkPurpose::ConsumeCommittedOutboxFact,
+                material,
                 acceptance,
                 actor,
                 meta.trace_ref,

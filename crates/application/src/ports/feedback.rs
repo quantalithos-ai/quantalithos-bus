@@ -1,6 +1,6 @@
 //! Feedback truth repository port.
 
-use bus_contracts::metadata::{FeedbackId, Version};
+use bus_contracts::metadata::{DeliveryId, FeedbackId, PageRequest, Version};
 use bus_domain::feedback::FeedbackResult;
 
 use crate::errors::RepositoryError;
@@ -20,4 +20,11 @@ pub trait FeedbackRepository: Send + Sync {
         &self,
         feedback_id: &FeedbackId,
     ) -> Result<Option<FeedbackResult>, RepositoryError>;
+
+    /// Lists committed feedback results for one delivery.
+    async fn find_by_delivery(
+        &self,
+        delivery_id: &DeliveryId,
+        page: PageRequest,
+    ) -> Result<Vec<FeedbackResult>, RepositoryError>;
 }

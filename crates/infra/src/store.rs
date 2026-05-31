@@ -7,15 +7,17 @@ use bus_application::{
     CommitReceipt, RepositoryError, UnitOfWorkError, UnitOfWorkHandle, UnitOfWorkPurpose,
 };
 use bus_contracts::metadata::{
-    DeadLetterId, DeliveryId, ExternalFeedbackRef, FailureMaterialId, FeedbackId, IdempotencyKey,
-    PageLimit, PublicationId, ReplayApprovalRef, ReplayPreparationId, RetryPlanId, RetryScanCursor,
-    Timestamp, Version,
+    BackendId, DeadLetterId, DeliveryId, ExternalFeedbackRef, FailureMaterialId, FailureSummaryId,
+    FeedbackId, IdempotencyKey, PageLimit, ProjectionVersion, PublicationId, ReplayApprovalRef,
+    ReplayPreparationId, RetryPlanId, RetryScanCursor, Timestamp, TransportViewId, Version,
 };
+use bus_contracts::views::BackendHealthView;
 use bus_domain::audit::{AuditChain, BusAuditEntry};
 use bus_domain::delivery::DeliveryRecord;
 use bus_domain::feedback::FeedbackResult;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
-use bus_domain::publication::PublicationAcceptance;
+use bus_domain::publication::{PublicationAcceptance, PublicationMaterial};
+use bus_domain::read_output::{FailureSummaryProjection, TransportViewProjection};
 use bus_domain::recovery::{DeadLetterEntry, FailureMaterial, ReplayPreparation, RetryPlan};
 
 #[derive(Clone, Default)]
@@ -33,7 +35,13 @@ struct MemoryStoreInner {
     feedback_versions: BTreeMap<FeedbackId, Version>,
     feedback_sources: HashMap<(DeliveryId, ExternalFeedbackRef), FeedbackId>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
+    publication_materials: BTreeMap<PublicationId, PublicationMaterial>,
     publication_versions: BTreeMap<PublicationId, Version>,
+    transport_view_projections: BTreeMap<TransportViewId, TransportViewProjection>,
+    failure_summary_projections: BTreeMap<FailureSummaryId, FailureSummaryProjection>,
+    failure_summary_versions: BTreeMap<FailureSummaryId, ProjectionVersion>,
+    backend_health_views: BTreeMap<BackendId, BackendHealthView>,
+    backend_health_versions: BTreeMap<BackendId, ProjectionVersion>,
     retry_plans: BTreeMap<RetryPlanId, RetryPlan>,
     retry_plan_versions: BTreeMap<RetryPlanId, Version>,
     active_retry_plans: HashMap<DeliveryId, RetryPlanId>,
@@ -59,6 +67,10 @@ struct StagedTransaction {
     feedbacks: BTreeMap<FeedbackId, FeedbackResult>,
     feedback_sources: HashMap<(DeliveryId, ExternalFeedbackRef), FeedbackId>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
+    publication_materials: BTreeMap<PublicationId, PublicationMaterial>,
+    transport_view_projections: BTreeMap<TransportViewId, TransportViewProjection>,
+    failure_summary_projections: BTreeMap<FailureSummaryId, FailureSummaryProjection>,
+    backend_health_views: BTreeMap<BackendId, BackendHealthView>,
     retry_plans: BTreeMap<RetryPlanId, RetryPlan>,
     dead_letters: BTreeMap<DeadLetterId, DeadLetterEntry>,
     replay_preparations: BTreeMap<ReplayPreparationId, ReplayPreparation>,
@@ -138,6 +150,30 @@ impl SharedMemoryStore {
             inner
                 .publication_versions
                 .insert(publication_id, version + 1);
+        }
+        for (publication_id, material) in staged.publication_materials {
+            inner.publication_materials.insert(publication_id, material);
+        }
+        for (view_id, projection) in staged.transport_view_projections {
+            inner.transport_view_projections.insert(view_id, projection);
+        }
+        for (summary_id, projection) in staged.failure_summary_projections {
+            let next_version =
+                ProjectionVersion::next_after(inner.failure_summary_versions.get(&summary_id));
+            inner
+                .failure_summary_versions
+                .insert(summary_id.clone(), next_version);
+            inner
+                .failure_summary_projections
+                .insert(summary_id, projection);
+        }
+        for (backend_id, view) in staged.backend_health_views {
+            let next_version =
+                ProjectionVersion::next_after(inner.backend_health_versions.get(&backend_id));
+            inner
+                .backend_health_versions
+                .insert(backend_id.clone(), next_version);
+            inner.backend_health_views.insert(backend_id, view);
         }
         for (retry_plan_id, retry_plan) in staged.retry_plans {
             if retry_plan.status == bus_contracts::metadata::RetryPlanStatus::Scheduled {
@@ -241,12 +277,54 @@ impl SharedMemoryStore {
             + 1)
     }
 
+    /// Stages a publication-material snapshot.
+    pub fn stage_publication_material(
+        &self,
+        transaction_id: u64,
+        material: PublicationMaterial,
+    ) -> Result<(), RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner
+            .publication_materials
+            .contains_key(&material.publication_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        if staged
+            .publication_materials
+            .contains_key(&material.publication_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        staged
+            .publication_materials
+            .insert(material.publication_id.clone(), material);
+        Ok(())
+    }
+
     /// Returns a committed publication acceptance.
     pub fn publication(&self, publication_id: &PublicationId) -> Option<PublicationAcceptance> {
         self.inner
             .lock()
             .expect("memory store lock poisoned")
             .publications
+            .get(publication_id)
+            .cloned()
+    }
+
+    /// Returns a committed publication-material snapshot.
+    pub fn publication_material(
+        &self,
+        publication_id: &PublicationId,
+    ) -> Option<PublicationMaterial> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .publication_materials
             .get(publication_id)
             .cloned()
     }
@@ -733,6 +811,21 @@ impl SharedMemoryStore {
             .collect()
     }
 
+    /// Returns committed feedback results for one delivery ordered by observed time.
+    pub fn feedbacks_by_delivery(&self, delivery_id: &DeliveryId) -> Vec<FeedbackResult> {
+        let mut feedbacks = self
+            .inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .feedbacks
+            .values()
+            .filter(|feedback| &feedback.delivery_id == delivery_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        feedbacks.sort_by(|left, right| left.observed_at.as_str().cmp(right.observed_at.as_str()));
+        feedbacks
+    }
+
     /// Seeds a committed delivery aggregate for tests and fake workers.
     pub fn seed_delivery(&self, delivery: DeliveryRecord) -> Result<Version, RepositoryError> {
         let mut inner = self.inner.lock().expect("memory store lock poisoned");
@@ -809,5 +902,159 @@ impl SharedMemoryStore {
             .take(limit as usize)
             .cloned()
             .collect()
+    }
+
+    /// Stages one transport-view projection upsert.
+    pub fn stage_transport_view_projection(
+        &self,
+        transaction_id: u64,
+        projection: TransportViewProjection,
+    ) -> Result<ProjectionVersion, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let current = inner
+            .transport_view_projections
+            .get(&projection.view_id)
+            .map(|value| value.version.clone());
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        let mut staged_projection = projection;
+        staged_projection.version = ProjectionVersion::next_after(current.as_ref());
+        let version = staged_projection.version.clone();
+        staged
+            .transport_view_projections
+            .insert(staged_projection.view_id.clone(), staged_projection);
+        Ok(version)
+    }
+
+    /// Returns one committed transport-view projection.
+    pub fn transport_view_projection(
+        &self,
+        transport_view_id: &TransportViewId,
+    ) -> Option<TransportViewProjection> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .transport_view_projections
+            .get(transport_view_id)
+            .cloned()
+    }
+
+    /// Seeds one committed transport-view projection for tests.
+    pub fn seed_transport_view_projection(
+        &self,
+        projection: TransportViewProjection,
+    ) -> Result<ProjectionVersion, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let mut committed = projection;
+        committed.version = ProjectionVersion::next_after(
+            inner
+                .transport_view_projections
+                .get(&committed.view_id)
+                .map(|value| &value.version),
+        );
+        let version = committed.version.clone();
+        inner
+            .transport_view_projections
+            .insert(committed.view_id.clone(), committed);
+        Ok(version)
+    }
+
+    /// Stages one failure-summary projection upsert.
+    pub fn stage_failure_summary_projection(
+        &self,
+        transaction_id: u64,
+        projection: FailureSummaryProjection,
+    ) -> Result<ProjectionVersion, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let version = ProjectionVersion::next_after(
+            inner.failure_summary_versions.get(&projection.summary_id),
+        );
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        staged
+            .failure_summary_projections
+            .insert(projection.summary_id.clone(), projection);
+        Ok(version)
+    }
+
+    /// Returns one committed failure-summary projection.
+    pub fn failure_summary_projection(
+        &self,
+        failure_summary_id: &FailureSummaryId,
+    ) -> Option<FailureSummaryProjection> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .failure_summary_projections
+            .get(failure_summary_id)
+            .cloned()
+    }
+
+    /// Seeds one committed failure-summary projection for tests.
+    pub fn seed_failure_summary_projection(
+        &self,
+        projection: FailureSummaryProjection,
+    ) -> Result<ProjectionVersion, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let version = ProjectionVersion::next_after(
+            inner.failure_summary_versions.get(&projection.summary_id),
+        );
+        inner
+            .failure_summary_versions
+            .insert(projection.summary_id.clone(), version.clone());
+        inner
+            .failure_summary_projections
+            .insert(projection.summary_id.clone(), projection);
+        Ok(version)
+    }
+
+    /// Stages one backend-health view upsert.
+    pub fn stage_backend_health_view(
+        &self,
+        transaction_id: u64,
+        view: BackendHealthView,
+    ) -> Result<ProjectionVersion, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let version =
+            ProjectionVersion::next_after(inner.backend_health_versions.get(&view.backend_id));
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        staged
+            .backend_health_views
+            .insert(view.backend_id.clone(), view);
+        Ok(version)
+    }
+
+    /// Returns one committed backend-health view.
+    pub fn backend_health_view(&self, backend_id: &BackendId) -> Option<BackendHealthView> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .backend_health_views
+            .get(backend_id)
+            .cloned()
+    }
+
+    /// Seeds one committed backend-health view for tests.
+    pub fn seed_backend_health_view(
+        &self,
+        view: BackendHealthView,
+    ) -> Result<ProjectionVersion, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let version =
+            ProjectionVersion::next_after(inner.backend_health_versions.get(&view.backend_id));
+        inner
+            .backend_health_versions
+            .insert(view.backend_id.clone(), version.clone());
+        inner
+            .backend_health_views
+            .insert(view.backend_id.clone(), view);
+        Ok(version)
     }
 }

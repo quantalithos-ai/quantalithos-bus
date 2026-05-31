@@ -30,6 +30,22 @@ pub enum SubjectRef {
     },
 }
 
+impl SubjectRef {
+    /// Returns the stable record reference used by read-only audit views.
+    pub fn record_ref(&self) -> String {
+        match self {
+            Self::Publication(publication_id) => publication_id.as_str().to_owned(),
+            Self::Delivery(delivery_id) => delivery_id.as_str().to_owned(),
+            Self::RetryPlan(retry_plan_id) => retry_plan_id.as_str().to_owned(),
+            Self::DeadLetter(dead_letter_id) => dead_letter_id.as_str().to_owned(),
+            Self::ReplayPreparation(replay_preparation_id) => {
+                replay_preparation_id.as_str().to_owned()
+            }
+            Self::IdempotencyKey { key, .. } => key.as_str().to_owned(),
+        }
+    }
+}
+
 /// A stable audit action emitted by the publication write path.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuditAction {
@@ -61,6 +77,30 @@ pub enum AuditAction {
     TimeoutSignalIgnored,
     /// A request reused an idempotency key with a different digest.
     IdempotencyConflict,
+}
+
+impl AuditAction {
+    /// Returns the stable event kind used by read-only audit views.
+    pub fn event_kind(&self) -> bus_contracts::metadata::AuditEventKind {
+        let value = match self {
+            Self::PublicationAccepted => "publication_accepted",
+            Self::PublicationRejected(_) => "publication_rejected",
+            Self::DeliveryDispatchStarted => "delivery_dispatch_started",
+            Self::DeliveryDelivered => "delivery_delivered",
+            Self::DeliveryFailed(_) => "delivery_failed",
+            Self::FeedbackRecorded(_) => "feedback_recorded",
+            Self::RetryRequested => "retry_requested",
+            Self::RetryAttempted => "retry_attempted",
+            Self::RetryExhausted => "retry_exhausted",
+            Self::DeadLetterCreated => "dead_letter_created",
+            Self::ReplayPreparationReady => "replay_preparation_ready",
+            Self::BackendSignalIgnored => "backend_signal_ignored",
+            Self::TimeoutSignalIgnored => "timeout_signal_ignored",
+            Self::IdempotencyConflict => "idempotency_conflict",
+        };
+
+        bus_contracts::metadata::AuditEventKind::new(value)
+    }
 }
 
 /// One auditable recovery chain loaded by reference.

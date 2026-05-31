@@ -434,6 +434,13 @@ mod tests {
     }
 
     impl crate::ports::DeliveryRepository for TestDeliveryRepository {
+        async fn get(
+            &self,
+            delivery_id: &DeliveryId,
+        ) -> Result<Option<DeliveryRecord>, crate::errors::RepositoryError> {
+            Ok(self.committed(delivery_id))
+        }
+
         async fn get_for_update(
             &self,
             delivery_id: &DeliveryId,
@@ -532,6 +539,18 @@ mod tests {
                 .or_default()
                 .push(entry);
             Ok(next_sequence)
+        }
+
+        async fn list(
+            &self,
+            _filter: bus_contracts::queries::AuditFilter,
+            _page: bus_contracts::metadata::PageRequest,
+        ) -> Result<bus_contracts::views::BusAuditTrailView, crate::errors::RepositoryError>
+        {
+            Ok(bus_contracts::views::BusAuditTrailView {
+                items: Vec::new(),
+                next_cursor: None,
+            })
         }
 
         async fn load_chain(

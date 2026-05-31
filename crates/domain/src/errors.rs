@@ -29,6 +29,10 @@ pub enum DomainError {
     InvalidReplayPreparation(&'static str),
     /// The failure material is missing a required reference or audit link.
     InvalidFailureMaterial(&'static str),
+    /// The transport-view projection is missing a required reference.
+    InvalidTransportViewProjection(&'static str),
+    /// The failure-summary projection is missing a required reference.
+    InvalidFailureSummaryProjection(&'static str),
     /// The recovery policy configuration is invalid.
     InvalidRecoveryPolicy(&'static str),
     /// The request digest could not be computed.
@@ -70,6 +74,13 @@ pub enum DomainError {
         /// The requested target replay-preparation state.
         to: ReplayPreparationStatus,
     },
+    /// The requested read-projection transition is not allowed.
+    InvalidProjectionStatusTransition {
+        /// The current projection state.
+        from: crate::read_output::ProjectionStatus,
+        /// The requested target projection state.
+        to: crate::read_output::ProjectionStatus,
+    },
     /// A terminal acceptance state cannot be reopened.
     TerminalStateReopenRejected,
     /// A terminal delivery state cannot be reopened.
@@ -98,6 +109,8 @@ pub enum DomainError {
     DeadLetterCannotDispatchDirectly,
     /// Replay preparation is not the replay executor boundary.
     ReplayPreparationIsNotExecutor,
+    /// Read-only projection logic attempted to mutate bus truth.
+    ReadOnlyProjectionViolation,
     /// The provided delivery attempt has not been finished.
     AttemptNotFinished,
     /// The provided delivery attempt was already finished.
@@ -140,6 +153,12 @@ impl fmt::Display for DomainError {
             Self::InvalidFailureMaterial(field) => {
                 write!(formatter, "invalid failure material: {field}")
             }
+            Self::InvalidTransportViewProjection(field) => {
+                write!(formatter, "invalid transport view projection: {field}")
+            }
+            Self::InvalidFailureSummaryProjection(field) => {
+                write!(formatter, "invalid failure summary projection: {field}")
+            }
             Self::InvalidRecoveryPolicy(field) => {
                 write!(formatter, "invalid recovery policy: {field}")
             }
@@ -167,6 +186,12 @@ impl fmt::Display for DomainError {
                 write!(
                     formatter,
                     "invalid replay preparation transition: {from:?} -> {to:?}"
+                )
+            }
+            Self::InvalidProjectionStatusTransition { from, to } => {
+                write!(
+                    formatter,
+                    "invalid projection status transition: {from:?} -> {to:?}"
                 )
             }
             Self::TerminalStateReopenRejected => {
@@ -204,6 +229,9 @@ impl fmt::Display for DomainError {
             }
             Self::ReplayPreparationIsNotExecutor => {
                 formatter.write_str("replay preparation is not the replay executor")
+            }
+            Self::ReadOnlyProjectionViolation => {
+                formatter.write_str("read-only projection attempted to mutate truth")
             }
             Self::AttemptNotFinished => formatter.write_str("delivery attempt is not finished"),
             Self::AttemptAlreadyFinished => {

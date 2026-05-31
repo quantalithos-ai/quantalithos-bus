@@ -81,6 +81,8 @@ macro_rules! numeric_newtype {
 
 string_newtype!(AuditRef, "A reference to a committed bus audit entry.");
 string_newtype!(AuditChainRef, "A reference to a committed bus audit chain.");
+string_newtype!(AuditCursor, "A cursor for committed bus-audit scans.");
+string_newtype!(AuditEventKind, "A stable bus-audit event kind.");
 string_newtype!(
     BackendCapabilityId,
     "A stable backend capability identifier."
@@ -139,6 +141,7 @@ string_newtype!(
     "A stable reference to a delivery history entry."
 );
 string_newtype!(DeliveryId, "A stable delivery identifier.");
+string_newtype!(FailureSummaryId, "A stable failure-summary identifier.");
 string_newtype!(
     DeliveryScanCursor,
     "A cursor for schedulable delivery scans."
@@ -180,9 +183,14 @@ string_newtype!(
     "A stable publication acceptance fact identifier."
 );
 string_newtype!(PublicationId, "A stable publication material identifier.");
+string_newtype!(ProjectionVersion, "A stable projection-version identifier.");
 string_newtype!(
     RejectionReasonRef,
     "A stable reference to a publication rejection reason code."
+);
+string_newtype!(
+    ReadOnlyPolicyRef,
+    "A stable read-only output policy reference."
 );
 string_newtype!(
     RecoveryPolicyConfigRef,
@@ -210,6 +218,7 @@ string_newtype!(RetryRequestReason, "A stable retry request reason.");
 string_newtype!(SourceRecordRef, "A stable source record reference.");
 string_newtype!(SourceSystem, "A stable source system identifier.");
 string_newtype!(SubscriberRef, "A stable subscriber identifier.");
+string_newtype!(TransportViewId, "A stable transport-view identifier.");
 string_newtype!(
     TransportSemanticId,
     "A stable transport semantic identifier."
@@ -404,6 +413,41 @@ impl AuditChainRef {
     }
 }
 
+impl ProjectionVersion {
+    /// Returns the initial projection version.
+    pub fn initial() -> Self {
+        Self::new("projection_v1")
+    }
+
+    /// Returns the next monotonic projection version after the provided value.
+    pub fn next_after(current: Option<&Self>) -> Self {
+        let next = current
+            .and_then(|value| value.as_str().strip_prefix("projection_v"))
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|value| value + 1)
+            .unwrap_or(1);
+
+        Self::new(format!("projection_v{next}"))
+    }
+}
+
+impl TransportViewId {
+    /// Builds a stable transport-view identifier from one delivery identifier.
+    pub fn from_delivery_id(delivery_id: &DeliveryId) -> Self {
+        Self::new(format!("transport_view_{}", sanitize(delivery_id.as_str())))
+    }
+}
+
+impl FailureSummaryId {
+    /// Builds a stable failure-summary identifier from one failure-material identifier.
+    pub fn from_failure_material_id(failure_material_id: &FailureMaterialId) -> Self {
+        Self::new(format!(
+            "failure_summary_{}",
+            sanitize(failure_material_id.as_str())
+        ))
+    }
+}
+
 /// The supported payload reference kinds for publication acceptance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -520,6 +564,16 @@ pub enum FeedbackRecordStatus {
     Recorded,
 }
 
+/// The query-visible capability state of one backend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendCapabilityStatus {
+    /// The backend is available for the current capability profile.
+    Available,
+    /// The backend is degraded but still visible to operators.
+    Degraded,
+}
+
 /// The supported transport backend kind.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -581,6 +635,8 @@ impl TimeoutReason {
 pub enum ConsistencyMarker {
     /// The returned view reflects committed truth.
     Committed,
+    /// The returned view is readable but known stale.
+    Stale,
 }
 
 /// The source that triggered a one-off operations job.
@@ -630,6 +686,14 @@ pub struct TargetScope {
     pub project_id: String,
     /// The logical topic name requested by the caller.
     pub topic: String,
+}
+
+/// The stable classification exposed by one failure summary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    /// The failure originated from transport or feedback handling.
+    TransportFailure,
 }
 
 /// The subscriber scope carried by transport semantic.

@@ -366,6 +366,14 @@ impl From<DomainError> for ApplicationError {
                 "validation.failure_material",
                 format!("invalid failure material field: {field}"),
             ),
+            DomainError::InvalidTransportViewProjection(field) => Self::validation(
+                "validation.transport_view_projection",
+                format!("invalid transport view projection field: {field}"),
+            ),
+            DomainError::InvalidFailureSummaryProjection(field) => Self::validation(
+                "validation.failure_summary_projection",
+                format!("invalid failure summary projection field: {field}"),
+            ),
             DomainError::InvalidRecoveryPolicy(field) => Self::validation(
                 "validation.recovery_policy",
                 format!("invalid recovery policy field: {field}"),
@@ -410,6 +418,9 @@ impl From<DomainError> for ApplicationError {
             | DomainError::ReplayPreparationNotAllowed => {
                 Self::conflict("conflict.replay_preparation_state", error.to_string(), None)
             }
+            DomainError::InvalidProjectionStatusTransition { .. } => {
+                Self::conflict("conflict.projection_state", error.to_string(), None)
+            }
             DomainError::TargetScopeMismatch | DomainError::NonDurableTransportSemantic => {
                 Self::validation("validation.transport_semantic", error.to_string())
             }
@@ -426,6 +437,11 @@ impl From<DomainError> for ApplicationError {
             DomainError::DeadLetterCannotDispatchDirectly
             | DomainError::ReplayPreparationIsNotExecutor => Self::boundary_violation(
                 "boundary.recovery_executor_rejected",
+                error.to_string(),
+                None,
+            ),
+            DomainError::ReadOnlyProjectionViolation => Self::boundary_violation(
+                "boundary.read_only_projection_rejected",
                 error.to_string(),
                 None,
             ),

@@ -14,8 +14,9 @@ pub use errors::{
 pub use ports::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, BusRecordKind,
     ClockPort, CommitReceipt, DeliveryRepository, FeedbackRepository, IdGeneratorPort,
-    IdempotencyRepository, OutboxFactSourcePort, PublicationRepository, RecoveryRepository,
-    RollbackReason, TransportBackendPort, UnitOfWork, UnitOfWorkHandle, UnitOfWorkPurpose,
+    IdempotencyRepository, OutboxFactSourcePort, PublicationRepository, ReadProjectionRepository,
+    RecoveryRepository, RollbackReason, TransportBackendPort, UnitOfWork, UnitOfWorkHandle,
+    UnitOfWorkPurpose,
 };
 pub use services::{
     BackendSignalUseCase, DeliveryFeedbackUseCase, DeliveryProgressionItemResult,
@@ -23,7 +24,8 @@ pub use services::{
     FeedbackRecordingService, FeedbackRecordingServiceDeps, MoveToDeadLetterUseCase,
     OutboxPublicationAcceptanceUseCase, OutboxRelayService, OutboxRelayServiceDeps,
     OutboxRelayUseCase, PublicationAcceptanceService, PublicationAcceptanceServiceDeps,
-    PublicationAcceptanceUseCase, RecoveryOrchestrationService, RecoveryOrchestrationServiceDeps,
-    ReplayPreparationService, ReplayPreparationServiceDeps, ReplayPreparationUseCase,
-    RequestRetryUseCase, RetryCycleUseCase, TimeoutSignalUseCase,
+    PublicationAcceptanceUseCase, ReadOutputService, ReadOutputServiceDeps, ReadOutputUseCase,
+    RecoveryOrchestrationService, RecoveryOrchestrationServiceDeps, ReplayPreparationService,
+    ReplayPreparationServiceDeps, ReplayPreparationUseCase, RequestRetryUseCase, RetryCycleUseCase,
+    TimeoutSignalUseCase,
 };

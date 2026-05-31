@@ -4,6 +4,7 @@ mod delivery;
 mod feedback;
 mod outbox;
 mod publication;
+mod read_output;
 mod recovery;
 
 pub use delivery::{
@@ -19,6 +20,7 @@ pub use publication::{
     OutboxPublicationAcceptanceUseCase, PublicationAcceptanceService,
     PublicationAcceptanceServiceDeps, PublicationAcceptanceUseCase,
 };
+pub use read_output::{ReadOutputService, ReadOutputServiceDeps, ReadOutputUseCase};
 pub use recovery::{
     MoveToDeadLetterUseCase, RecoveryOrchestrationService, RecoveryOrchestrationServiceDeps,
     ReplayPreparationService, ReplayPreparationServiceDeps, ReplayPreparationUseCase,
