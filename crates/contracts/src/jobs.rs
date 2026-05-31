@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{BackendId, DeliveryScanCursor, JobRunId, OutboxCursor};
+use crate::metadata::{
+    BackendId, DeliveryScanCursor, JobRunId, OutboxCursor, RetryScanCursor, Timestamp,
+};
 
 /// Scans committed outbox facts and relays them into bus publication acceptance.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -141,5 +143,75 @@ impl DeliveryProgressionResult {
     /// Returns the number of failed items in the batch.
     pub fn failed(&self) -> u32 {
         self.scanned - self.dispatched - self.skipped
+    }
+}
+
+/// Scans due retry plans and executes one retry attempt per eligible plan.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunRetryCycleJob {
+    /// The unique job run identifier.
+    pub job_run_id: JobRunId,
+    /// The due-retry scan cursor.
+    pub cursor: RetryScanCursor,
+    /// The maximum number of retry plans to scan in the current batch.
+    pub batch_size: u32,
+    /// The stable execution timestamp used by the current batch.
+    pub now: Timestamp,
+}
+
+/// The summary returned after a retry-cycle job run.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetryCycleResult {
+    /// The unique job run identifier.
+    pub job_run_id: JobRunId,
+    /// The number of retry plans scanned in the batch.
+    pub scanned: u32,
+    /// The number of retry plans that produced a committed retry attempt.
+    pub retried: u32,
+    /// The number of retry plans that were committed as exhausted.
+    pub exhausted: u32,
+    /// The next cursor to use for a following batch.
+    pub next_cursor: RetryScanCursor,
+}
+
+impl RetryCycleResult {
+    /// Starts a new retry-cycle summary.
+    pub fn start(job_run_id: JobRunId, next_cursor: RetryScanCursor) -> Self {
+        Self {
+            job_run_id,
+            scanned: 0,
+            retried: 0,
+            exhausted: 0,
+            next_cursor,
+        }
+    }
+
+    /// Records one committed retry attempt.
+    pub fn record_retried(&mut self) {
+        self.scanned += 1;
+        self.retried += 1;
+    }
+
+    /// Records one committed exhausted retry plan.
+    pub fn record_exhausted(&mut self) {
+        self.scanned += 1;
+        self.exhausted += 1;
+    }
+
+    /// Records one failed retry-plan item.
+    pub fn record_failed(&mut self) {
+        self.scanned += 1;
+    }
+
+    /// Updates the next scan cursor.
+    pub fn set_next_cursor(&mut self, next_cursor: RetryScanCursor) {
+        self.next_cursor = next_cursor;
+    }
+
+    /// Returns the number of failed items in the batch.
+    pub fn failed(&self) -> u32 {
+        self.scanned - self.retried - self.exhausted
     }
 }

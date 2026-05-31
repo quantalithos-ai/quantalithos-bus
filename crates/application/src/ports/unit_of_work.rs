@@ -19,6 +19,14 @@ pub enum UnitOfWorkPurpose {
     ConsumeBackendDeliverySignal,
     /// The timeout signal consumer write path.
     ConsumeTimeoutSignal,
+    /// The retry-request write path.
+    RequestRetry,
+    /// The retry-cycle job item write path.
+    RunRetryCycle,
+    /// The dead-letter write path.
+    MoveDeliveryToDeadLetter,
+    /// The replay-preparation write path.
+    PrepareReplay,
 }
 
 /// A rollback reason label.

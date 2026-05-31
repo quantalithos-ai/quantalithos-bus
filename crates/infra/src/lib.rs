@@ -10,7 +10,8 @@ mod uow;
 pub use id::DeterministicIdGenerator;
 pub use repositories::{
     InMemoryAuditTrailRepository, InMemoryDeliveryRepository, InMemoryFeedbackRepository,
-    InMemoryIdempotencyRepository, InMemoryPublicationRepository, InMemoryTransportBackendAdapter,
+    InMemoryIdempotencyRepository, InMemoryPublicationRepository, InMemoryRecoveryRepository,
+    InMemoryTransportBackendAdapter,
 };
 pub use source::{InMemoryOutboxFactSourceAdapter, OutboxSourceFixtureError, SharedOutboxSource};
 pub use store::SharedMemoryStore;

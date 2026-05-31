@@ -1,8 +1,11 @@
 //! Operations job runners for the bus workspace.
 
-use bus_application::{ApplicationError, DeliveryProgressionUseCase, OutboxRelayUseCase};
+use bus_application::{
+    ApplicationError, DeliveryProgressionUseCase, OutboxRelayUseCase, RetryCycleUseCase,
+};
 use bus_contracts::jobs::{
-    DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
+    DeliveryProgressionResult, OutboxRelayJobResult, RetryCycleResult, RunDeliveryProgressionJob,
+    RunOutboxRelayJob, RunRetryCycleJob,
 };
 use bus_contracts::metadata::{ActorContext, JobMetadata};
 
@@ -86,6 +89,36 @@ impl<S> OutboxRelayJobRunner<S> {
     }
 }
 
+/// Job runner for due retry plans.
+pub struct RetryCycleJobRunner<S> {
+    recovery_service: S,
+}
+
+impl<S> RetryCycleJobRunner<S> {
+    /// Creates a new retry-cycle job runner.
+    pub fn new(recovery_service: S) -> Self {
+        Self { recovery_service }
+    }
+}
+
+impl<S> RetryCycleJobRunner<S>
+where
+    S: RetryCycleUseCase,
+{
+    /// Runs one retry-cycle batch.
+    pub async fn run(
+        &self,
+        job: RunRetryCycleJob,
+        actor: ActorContext,
+        meta: JobMetadata,
+    ) -> Result<RetryCycleResult, JobError> {
+        self.recovery_service
+            .run_retry_cycle(job, actor, meta)
+            .await
+            .map_err(JobError::from)
+    }
+}
+
 impl<S> OutboxRelayJobRunner<S>
 where
     S: OutboxRelayUseCase,
@@ -111,22 +144,31 @@ mod tests {
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
     use bus_application::{
-        DeliveryProgressionService, DeliveryProgressionServiceDeps, OutboxRelayService,
-        OutboxRelayServiceDeps, PublicationAcceptanceService, PublicationAcceptanceServiceDeps,
-        SourcePortError, TransportPortError,
+        AuditTrailRepository, DeliveryProgressionService, DeliveryProgressionServiceDeps,
+        OutboxRelayService, OutboxRelayServiceDeps, PublicationAcceptanceService,
+        PublicationAcceptanceServiceDeps, RecoveryOrchestrationService,
+        RecoveryOrchestrationServiceDeps, RequestRetryUseCase, SourcePortError, TransportPortError,
+        UnitOfWork, UnitOfWorkPurpose,
     };
     use bus_contracts::fixtures::{
-        BackendFixtureBuilder, DeliveryFixtureBuilder, OutboxFixtureBuilder,
-        PublicationFixtureBuilder, TestRun, TestRunBuilder,
+        BackendFixtureBuilder, DeliveryFixtureBuilder, FeedbackFixtureBuilder,
+        OutboxFixtureBuilder, PublicationFixtureBuilder, RecoveryFixtureBuilder, TestRun,
+        TestRunBuilder,
     };
-    use bus_contracts::metadata::{IdempotencyKey, SubscriberRef, SubscriberScope};
-    use bus_domain::delivery::DeliveryRecord;
+    use bus_contracts::metadata::{
+        AuditRef, DeliveryStatus, FeedbackStatus, HistoryReason, IdempotencyKey, JobMetadata,
+        JobRunId, JobTriggerSource, SubscriberRef, SubscriberScope, Timestamp, TraceId,
+    };
+    use bus_domain::audit::{AuditAction, BusAuditEntry, SubjectRef};
+    use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
+    use bus_domain::feedback::FeedbackResult;
     use bus_domain::publication::{PublicationMaterial, TransportSemantic};
+    use bus_domain::recovery::{FailureMaterial, RetryPlan};
     use bus_infra::{
         DeterministicIdGenerator, FixedClockAdapter, InMemoryAuditTrailRepository,
         InMemoryDeliveryRepository, InMemoryIdempotencyRepository, InMemoryOutboxFactSourceAdapter,
-        InMemoryPublicationRepository, InMemoryTransportBackendAdapter, InMemoryUnitOfWork,
-        SharedMemoryStore, SharedOutboxSource,
+        InMemoryPublicationRepository, InMemoryRecoveryRepository, InMemoryTransportBackendAdapter,
+        InMemoryUnitOfWork, SharedMemoryStore, SharedOutboxSource,
     };
 
     use super::*;
@@ -186,6 +228,153 @@ mod tests {
             IdempotencyKey::new(format!("idem_job_{}_{}", run.run_id, subscriber_ref)),
         )
         .expect("fixture should schedule delivery")
+    }
+
+    type RecoveryJobService = RecoveryOrchestrationService<
+        InMemoryDeliveryRepository,
+        InMemoryRecoveryRepository,
+        InMemoryAuditTrailRepository,
+        InMemoryUnitOfWork,
+        FixedClockAdapter,
+        DeterministicIdGenerator,
+        InMemoryTransportBackendAdapter,
+    >;
+
+    fn retry_runner(
+        run: &TestRun,
+    ) -> (
+        RetryCycleJobRunner<RecoveryJobService>,
+        RecoveryJobService,
+        InMemoryDeliveryRepository,
+        InMemoryRecoveryRepository,
+        InMemoryAuditTrailRepository,
+        InMemoryUnitOfWork,
+    ) {
+        let store = SharedMemoryStore::new();
+        let delivery_repository = InMemoryDeliveryRepository::new(store.clone());
+        let recovery_repository = InMemoryRecoveryRepository::new(store.clone());
+        let audit_repository = InMemoryAuditTrailRepository::new(store.clone());
+        let unit_of_work = InMemoryUnitOfWork::new(store.clone());
+        let clock = FixedClockAdapter::new(Timestamp::new("2026-05-31T00:05:00Z"));
+        let ids = DeterministicIdGenerator::new();
+        let backend = InMemoryTransportBackendAdapter::new(
+            BackendFixtureBuilder::new(run.clone()).in_memory_capability(),
+        );
+        let recovery_deps = RecoveryOrchestrationServiceDeps {
+            delivery_repository: delivery_repository.clone(),
+            recovery_repository: recovery_repository.clone(),
+            audit_repository: audit_repository.clone(),
+            unit_of_work: unit_of_work.clone(),
+            clock,
+            id_generator: ids,
+            transport_backend: backend,
+        };
+        let recovery_service =
+            RecoveryOrchestrationService::new(RecoveryOrchestrationServiceDeps {
+                delivery_repository: recovery_deps.delivery_repository.clone(),
+                recovery_repository: recovery_deps.recovery_repository.clone(),
+                audit_repository: recovery_deps.audit_repository.clone(),
+                unit_of_work: recovery_deps.unit_of_work.clone(),
+                clock: recovery_deps.clock.clone(),
+                id_generator: recovery_deps.id_generator.clone(),
+                transport_backend: recovery_deps.transport_backend.clone(),
+            });
+        let runner = RetryCycleJobRunner::new(RecoveryOrchestrationService::new(recovery_deps));
+
+        (
+            runner,
+            recovery_service,
+            delivery_repository,
+            recovery_repository,
+            audit_repository,
+            unit_of_work,
+        )
+    }
+
+    fn failed_delivery_with_material(
+        run: &TestRun,
+    ) -> (DeliveryRecord, FailureMaterial, BusAuditEntry) {
+        let mut delivery = scheduled_delivery(run, "retry_subscriber");
+        let capability_ref = BackendFixtureBuilder::new(run.clone()).in_memory_capability();
+        let mut attempt = delivery
+            .start_attempt(capability_ref, Timestamp::new("2026-05-31T00:00:01Z"))
+            .expect("delivery should start");
+        delivery
+            .append_history(DeliveryHistoryEntry::transition(
+                delivery.delivery_id.clone(),
+                DeliveryStatus::Scheduled,
+                DeliveryStatus::Dispatching,
+                HistoryReason::dispatching_started(),
+                Timestamp::new("2026-05-31T00:00:01Z"),
+            ))
+            .expect("dispatching history should append");
+        attempt
+            .finish(
+                bus_contracts::metadata::BackendDeliveryResult::delivered(Some(
+                    "backend_delivery_retry".into(),
+                )),
+                Timestamp::new("2026-05-31T00:00:02Z"),
+            )
+            .expect("attempt should finish as delivered");
+        delivery
+            .mark_delivered(attempt, run.actor.clone())
+            .expect("delivery should become delivered");
+        delivery
+            .append_history(DeliveryHistoryEntry::transition(
+                delivery.delivery_id.clone(),
+                DeliveryStatus::Dispatching,
+                DeliveryStatus::Delivered,
+                HistoryReason::delivery_arrived(),
+                Timestamp::new("2026-05-31T00:00:02Z"),
+            ))
+            .expect("delivered history should append");
+
+        let feedback_builder = FeedbackFixtureBuilder::new(run.clone());
+        let fail_command = feedback_builder.fail_command(
+            delivery.delivery_id.clone(),
+            delivery
+                .last_attempt_ref
+                .clone()
+                .expect("attempt ref should exist")
+                .as_str()
+                .into(),
+        );
+        let feedback = FeedbackResult::from_command(fail_command, run.actor.clone())
+            .expect("failed feedback should build");
+        delivery
+            .mark_failed(feedback.failure_reason(), run.actor.clone())
+            .expect("delivery should become failed");
+        let failed_history = DeliveryHistoryEntry::transition(
+            delivery.delivery_id.clone(),
+            DeliveryStatus::Delivered,
+            DeliveryStatus::Failed,
+            HistoryReason::feedback_fail(),
+            Timestamp::new("2026-05-31T00:00:03Z"),
+        );
+        delivery
+            .append_history(failed_history.clone())
+            .expect("failed history should append");
+        let audit_ref = AuditRef::new(format!("audit_retry_failure_{}", run.run_id));
+        let material = FailureMaterial::from_feedback(feedback, failed_history, audit_ref.clone())
+            .expect("failure material should build");
+        let audit = BusAuditEntry::record(
+            audit_ref,
+            SubjectRef::Delivery(delivery.delivery_id.clone()),
+            AuditAction::FeedbackRecorded(FeedbackStatus::Fail),
+            run.actor.clone(),
+            run.metadata.request.trace_id.clone(),
+            Timestamp::new("2026-05-31T00:00:03Z"),
+        );
+
+        (delivery, material, audit)
+    }
+
+    fn recovery_job_metadata(run: &TestRun) -> JobMetadata {
+        JobMetadata {
+            job_run_id: JobRunId::new(format!("job_run_{}", run.run_id)),
+            trace_ref: TraceId::new(format!("trace-job-{}", run.run_id)),
+            trigger_source: JobTriggerSource::Scheduler,
+        }
     }
 
     fn outbox_runner(
@@ -435,6 +624,130 @@ mod tests {
         assert_eq!(
             source.acknowledged_marker(&fact.committed_fact_ref),
             Some(bus_contracts::metadata::ConsumerMarker::bus())
+        );
+    }
+
+    #[test]
+    fn retry_cycle_job_runner_dispatches_due_retry_plans() {
+        let run = TestRunBuilder::new("job-retry-001").build();
+        let builder = RecoveryFixtureBuilder::new(run.clone());
+        let (
+            runner,
+            recovery_service,
+            delivery_repository,
+            recovery_repository,
+            audit_repository,
+            unit_of_work,
+        ) = retry_runner(&run);
+        let (delivery, material, audit) = failed_delivery_with_material(&run);
+        delivery_repository
+            .seed_committed(delivery.clone())
+            .expect("failed delivery should seed");
+        recovery_repository
+            .seed_failure_material(material.clone())
+            .expect("failure material should seed");
+        let uow = block_on(
+            unit_of_work.begin(UnitOfWorkPurpose::RecordDeliveryFeedback, run.actor.clone()),
+        )
+        .expect("audit seed should begin");
+        block_on(audit_repository.append(audit, &uow)).expect("audit seed should append");
+        block_on(unit_of_work.commit(uow)).expect("audit seed should commit");
+        let mut retry_command = builder.request_retry_command(delivery.delivery_id.clone());
+        retry_command.failure_material_ref = material.failure_material_id.clone().into();
+        let retry_result = block_on(recovery_service.request_retry(
+            retry_command,
+            run.actor.clone(),
+            run.metadata.clone(),
+        ))
+        .expect("retry plan should commit");
+
+        let result = block_on(runner.run(
+            builder.run_retry_cycle_job(),
+            run.actor.clone(),
+            recovery_job_metadata(&run),
+        ))
+        .expect("retry cycle should succeed");
+
+        assert_eq!(result.scanned, 1);
+        assert_eq!(result.retried, 1);
+        assert_eq!(result.exhausted, 0);
+        let committed_delivery = delivery_repository
+            .committed(&delivery.delivery_id)
+            .expect("delivery should remain committed");
+        assert_eq!(committed_delivery.status, DeliveryStatus::Delivered);
+        let committed_plan = recovery_repository
+            .committed_retry_plan(&retry_result.retry_plan_id)
+            .expect("retry plan should update");
+        assert_eq!(committed_plan.remaining_attempts.get(), 2);
+    }
+
+    #[test]
+    fn retry_cycle_job_runner_marks_zero_budget_plan_as_exhausted() {
+        let run = TestRunBuilder::new("job-retry-002").build();
+        let builder = RecoveryFixtureBuilder::new(run.clone());
+        let (
+            runner,
+            _recovery_service,
+            delivery_repository,
+            recovery_repository,
+            audit_repository,
+            unit_of_work,
+        ) = retry_runner(&run);
+        let (delivery, material, audit) = failed_delivery_with_material(&run);
+        delivery_repository
+            .seed_committed(delivery.clone())
+            .expect("failed delivery should seed");
+        recovery_repository
+            .seed_failure_material(material.clone())
+            .expect("failure material should seed");
+        let uow = block_on(
+            unit_of_work.begin(UnitOfWorkPurpose::RecordDeliveryFeedback, run.actor.clone()),
+        )
+        .expect("audit seed should begin");
+        block_on(audit_repository.append(audit, &uow)).expect("audit seed should append");
+        block_on(unit_of_work.commit(uow)).expect("audit seed should commit");
+        let mut retry_plan = RetryPlan::create(
+            delivery.clone(),
+            material.failure_reason.clone(),
+            builder.retry_policy_ref(),
+            bus_contracts::metadata::AttemptLimit::new(1),
+            Timestamp::new("2026-05-31T00:04:00Z"),
+        )
+        .expect("retry plan should build");
+        retry_plan
+            .mark_attempted(
+                "attempt_retry_prior".into(),
+                bus_contracts::metadata::BackendDeliveryResult::failed(None),
+            )
+            .expect("retry plan should consume its only attempt");
+        let retry_plan_id = retry_plan.retry_plan_id.clone();
+        recovery_repository
+            .seed_retry_plan(retry_plan)
+            .expect("retry plan should seed");
+
+        let result = block_on(runner.run(
+            builder.run_retry_cycle_job(),
+            run.actor.clone(),
+            recovery_job_metadata(&run),
+        ))
+        .expect("retry cycle should succeed");
+
+        assert_eq!(result.scanned, 1);
+        assert_eq!(result.retried, 0);
+        assert_eq!(result.exhausted, 1);
+        let committed_plan = recovery_repository
+            .committed_retry_plan(&retry_plan_id)
+            .expect("retry plan should remain committed");
+        assert_eq!(
+            committed_plan.status,
+            bus_contracts::metadata::RetryPlanStatus::Exhausted
+        );
+        assert_eq!(
+            delivery_repository
+                .committed(&delivery.delivery_id)
+                .expect("delivery should remain committed")
+                .status,
+            DeliveryStatus::Failed
         );
     }
 }

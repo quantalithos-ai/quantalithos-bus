@@ -1,6 +1,7 @@
 //! Audit repository port.
 
-use bus_domain::audit::BusAuditEntry;
+use bus_contracts::metadata::AuditChainRef;
+use bus_domain::audit::{AuditChain, BusAuditEntry};
 
 use crate::errors::RepositoryError;
 use crate::ports::UnitOfWorkHandle;
@@ -13,4 +14,7 @@ pub trait AuditTrailRepository: Send + Sync {
         entry: BusAuditEntry,
         uow: &UnitOfWorkHandle,
     ) -> Result<u64, RepositoryError>;
+
+    /// Loads one committed audit chain by reference.
+    async fn load_chain(&self, chain_ref: &AuditChainRef) -> Result<AuditChain, RepositoryError>;
 }

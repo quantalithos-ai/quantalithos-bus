@@ -7,13 +7,16 @@ use bus_application::{
     CommitReceipt, RepositoryError, UnitOfWorkError, UnitOfWorkHandle, UnitOfWorkPurpose,
 };
 use bus_contracts::metadata::{
-    DeliveryId, ExternalFeedbackRef, FeedbackId, IdempotencyKey, PublicationId, Version,
+    DeadLetterId, DeliveryId, ExternalFeedbackRef, FailureMaterialId, FeedbackId, IdempotencyKey,
+    PageLimit, PublicationId, ReplayApprovalRef, ReplayPreparationId, RetryPlanId, RetryScanCursor,
+    Timestamp, Version,
 };
-use bus_domain::audit::BusAuditEntry;
+use bus_domain::audit::{AuditChain, BusAuditEntry};
 use bus_domain::delivery::DeliveryRecord;
 use bus_domain::feedback::FeedbackResult;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
 use bus_domain::publication::PublicationAcceptance;
+use bus_domain::recovery::{DeadLetterEntry, FailureMaterial, ReplayPreparation, RetryPlan};
 
 #[derive(Clone, Default)]
 pub struct SharedMemoryStore {
@@ -31,6 +34,18 @@ struct MemoryStoreInner {
     feedback_sources: HashMap<(DeliveryId, ExternalFeedbackRef), FeedbackId>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
     publication_versions: BTreeMap<PublicationId, Version>,
+    retry_plans: BTreeMap<RetryPlanId, RetryPlan>,
+    retry_plan_versions: BTreeMap<RetryPlanId, Version>,
+    active_retry_plans: HashMap<DeliveryId, RetryPlanId>,
+    dead_letters: BTreeMap<DeadLetterId, DeadLetterEntry>,
+    dead_letter_versions: BTreeMap<DeadLetterId, Version>,
+    active_dead_letters: HashMap<DeliveryId, DeadLetterId>,
+    replay_preparations: BTreeMap<ReplayPreparationId, ReplayPreparation>,
+    replay_preparation_versions: BTreeMap<ReplayPreparationId, Version>,
+    replay_ready_by_dead_letter_approval:
+        HashMap<(DeadLetterId, ReplayApprovalRef), ReplayPreparationId>,
+    failure_materials: BTreeMap<FailureMaterialId, FailureMaterial>,
+    failure_material_versions: BTreeMap<FailureMaterialId, Version>,
     anchors: HashMap<(IdempotencyScope, IdempotencyKey), IdempotencyAnchor>,
     conflicts: Vec<IdempotencyConflict>,
     audits: Vec<BusAuditEntry>,
@@ -44,6 +59,10 @@ struct StagedTransaction {
     feedbacks: BTreeMap<FeedbackId, FeedbackResult>,
     feedback_sources: HashMap<(DeliveryId, ExternalFeedbackRef), FeedbackId>,
     publications: BTreeMap<PublicationId, PublicationAcceptance>,
+    retry_plans: BTreeMap<RetryPlanId, RetryPlan>,
+    dead_letters: BTreeMap<DeadLetterId, DeadLetterEntry>,
+    replay_preparations: BTreeMap<ReplayPreparationId, ReplayPreparation>,
+    failure_materials: BTreeMap<FailureMaterialId, FailureMaterial>,
     anchors: HashMap<(IdempotencyScope, IdempotencyKey), IdempotencyAnchor>,
     conflicts: Vec<IdempotencyConflict>,
     audits: Vec<BusAuditEntry>,
@@ -120,6 +139,55 @@ impl SharedMemoryStore {
                 .publication_versions
                 .insert(publication_id, version + 1);
         }
+        for (retry_plan_id, retry_plan) in staged.retry_plans {
+            if retry_plan.status == bus_contracts::metadata::RetryPlanStatus::Scheduled {
+                inner
+                    .active_retry_plans
+                    .insert(retry_plan.delivery_id.clone(), retry_plan_id.clone());
+            } else if inner.active_retry_plans.get(&retry_plan.delivery_id) == Some(&retry_plan_id)
+            {
+                inner.active_retry_plans.remove(&retry_plan.delivery_id);
+            }
+            inner
+                .retry_plan_versions
+                .insert(retry_plan_id.clone(), retry_plan.version());
+            inner.retry_plans.insert(retry_plan_id, retry_plan);
+        }
+        for (dead_letter_id, dead_letter) in staged.dead_letters {
+            if dead_letter.status != bus_contracts::metadata::DeadLetterStatus::Closed {
+                inner
+                    .active_dead_letters
+                    .insert(dead_letter.delivery_id.clone(), dead_letter_id.clone());
+            } else if inner.active_dead_letters.get(&dead_letter.delivery_id)
+                == Some(&dead_letter_id)
+            {
+                inner.active_dead_letters.remove(&dead_letter.delivery_id);
+            }
+            inner
+                .dead_letter_versions
+                .insert(dead_letter_id.clone(), dead_letter.version());
+            inner.dead_letters.insert(dead_letter_id, dead_letter);
+        }
+        for (replay_id, preparation) in staged.replay_preparations {
+            if let Some(approval_ref) = preparation.approval_ref.clone() {
+                inner.replay_ready_by_dead_letter_approval.insert(
+                    (preparation.dead_letter_id.clone(), approval_ref),
+                    replay_id.clone(),
+                );
+            }
+            inner
+                .replay_preparation_versions
+                .insert(replay_id.clone(), preparation.version());
+            inner.replay_preparations.insert(replay_id, preparation);
+        }
+        for (failure_material_id, material) in staged.failure_materials {
+            inner
+                .failure_material_versions
+                .insert(failure_material_id.clone(), material.version());
+            inner
+                .failure_materials
+                .insert(failure_material_id, material);
+        }
         for (key, anchor) in staged.anchors {
             inner.anchors.insert(key, anchor);
         }
@@ -180,6 +248,315 @@ impl SharedMemoryStore {
             .expect("memory store lock poisoned")
             .publications
             .get(publication_id)
+            .cloned()
+    }
+
+    /// Seeds a committed retry plan for tests and fake workers.
+    pub fn seed_retry_plan(&self, retry_plan: RetryPlan) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner.retry_plans.contains_key(&retry_plan.retry_plan_id) {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        if retry_plan.status == bus_contracts::metadata::RetryPlanStatus::Scheduled
+            && inner
+                .active_retry_plans
+                .contains_key(&retry_plan.delivery_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut committed = retry_plan;
+        committed.set_version(1);
+        if committed.status == bus_contracts::metadata::RetryPlanStatus::Scheduled {
+            inner.active_retry_plans.insert(
+                committed.delivery_id.clone(),
+                committed.retry_plan_id.clone(),
+            );
+        }
+        inner
+            .retry_plan_versions
+            .insert(committed.retry_plan_id.clone(), committed.version());
+        inner
+            .retry_plans
+            .insert(committed.retry_plan_id.clone(), committed);
+        Ok(1)
+    }
+
+    /// Stages a retry-plan create or update.
+    pub fn stage_retry_plan_save(
+        &self,
+        transaction_id: u64,
+        retry_plan: RetryPlan,
+        expected_version: Option<Version>,
+    ) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        let committed_version = inner
+            .retry_plan_versions
+            .get(&retry_plan.retry_plan_id)
+            .copied()
+            .unwrap_or(0);
+        match expected_version {
+            Some(version) if version != committed_version => {
+                return Err(RepositoryError::VersionConflict);
+            }
+            None if committed_version != 0 => return Err(RepositoryError::UniqueViolation),
+            _ => {}
+        }
+
+        if retry_plan.status == bus_contracts::metadata::RetryPlanStatus::Scheduled {
+            if let Some(existing_id) = inner.active_retry_plans.get(&retry_plan.delivery_id) {
+                if existing_id != &retry_plan.retry_plan_id {
+                    return Err(RepositoryError::UniqueViolation);
+                }
+            }
+        }
+
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        if retry_plan.status == bus_contracts::metadata::RetryPlanStatus::Scheduled
+            && staged.retry_plans.values().any(|candidate| {
+                candidate.delivery_id == retry_plan.delivery_id
+                    && candidate.status == bus_contracts::metadata::RetryPlanStatus::Scheduled
+                    && candidate.retry_plan_id != retry_plan.retry_plan_id
+            })
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut staged_retry_plan = retry_plan;
+        staged_retry_plan.set_version(committed_version + 1);
+        let new_version = staged_retry_plan.version();
+        staged
+            .retry_plans
+            .insert(staged_retry_plan.retry_plan_id.clone(), staged_retry_plan);
+
+        Ok(new_version)
+    }
+
+    /// Returns one committed retry plan.
+    pub fn retry_plan(&self, retry_plan_id: &RetryPlanId) -> Option<RetryPlan> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .retry_plans
+            .get(retry_plan_id)
+            .cloned()
+    }
+
+    /// Returns due retry plans ordered by identifier.
+    pub fn due_retry_plans(
+        &self,
+        cursor: &RetryScanCursor,
+        limit: PageLimit,
+        now: &Timestamp,
+    ) -> Vec<RetryPlan> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .retry_plans
+            .values()
+            .filter(|plan| {
+                plan.status == bus_contracts::metadata::RetryPlanStatus::Scheduled
+                    && plan.next_attempt_at.as_str() <= now.as_str()
+                    && plan.retry_plan_id.as_str() > cursor.as_str()
+            })
+            .take(limit.get() as usize)
+            .cloned()
+            .collect()
+    }
+
+    /// Seeds committed failure material for tests.
+    pub fn seed_failure_material(
+        &self,
+        material: FailureMaterial,
+    ) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner
+            .failure_materials
+            .contains_key(&material.failure_material_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut committed = material;
+        committed.set_version(1);
+        inner
+            .failure_material_versions
+            .insert(committed.failure_material_id.clone(), committed.version());
+        inner
+            .failure_materials
+            .insert(committed.failure_material_id.clone(), committed);
+        Ok(1)
+    }
+
+    /// Returns one committed failure material.
+    pub fn failure_material(
+        &self,
+        failure_material_id: &FailureMaterialId,
+    ) -> Option<FailureMaterial> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .failure_materials
+            .get(failure_material_id)
+            .cloned()
+    }
+
+    /// Seeds a committed dead-letter entry for tests.
+    pub fn seed_dead_letter(&self, entry: DeadLetterEntry) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner.dead_letters.contains_key(&entry.dead_letter_id) {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        if entry.status != bus_contracts::metadata::DeadLetterStatus::Closed
+            && inner.active_dead_letters.contains_key(&entry.delivery_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut committed = entry;
+        committed.set_version(1);
+        if committed.status != bus_contracts::metadata::DeadLetterStatus::Closed {
+            inner.active_dead_letters.insert(
+                committed.delivery_id.clone(),
+                committed.dead_letter_id.clone(),
+            );
+        }
+        inner
+            .dead_letter_versions
+            .insert(committed.dead_letter_id.clone(), committed.version());
+        inner
+            .dead_letters
+            .insert(committed.dead_letter_id.clone(), committed);
+        Ok(1)
+    }
+
+    /// Stages one dead-letter save and links the existing failure material.
+    pub fn stage_dead_letter_save(
+        &self,
+        transaction_id: u64,
+        entry: DeadLetterEntry,
+        material: FailureMaterial,
+    ) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner.dead_letters.contains_key(&entry.dead_letter_id)
+            || inner.active_dead_letters.contains_key(&entry.delivery_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        let current_material_version = inner
+            .failure_material_versions
+            .get(&material.failure_material_id)
+            .copied()
+            .ok_or(RepositoryError::VersionConflict)?;
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        if staged.dead_letters.contains_key(&entry.dead_letter_id)
+            || staged
+                .dead_letters
+                .values()
+                .any(|candidate| candidate.delivery_id == entry.delivery_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+
+        let mut staged_entry = entry;
+        staged_entry.set_version(1);
+        let mut staged_material = material;
+        staged_material.dead_letter_ref = Some(bus_contracts::metadata::DeadLetterRef::from(
+            staged_entry.dead_letter_id.clone(),
+        ));
+        staged_material.set_version(current_material_version + 1);
+        let new_version = staged_entry.version();
+        staged
+            .dead_letters
+            .insert(staged_entry.dead_letter_id.clone(), staged_entry);
+        staged
+            .failure_materials
+            .insert(staged_material.failure_material_id.clone(), staged_material);
+
+        Ok(new_version)
+    }
+
+    /// Returns one committed dead-letter entry.
+    pub fn dead_letter(&self, dead_letter_id: &DeadLetterId) -> Option<DeadLetterEntry> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .dead_letters
+            .get(dead_letter_id)
+            .cloned()
+    }
+
+    /// Stages one replay preparation save.
+    pub fn stage_replay_preparation_save(
+        &self,
+        transaction_id: u64,
+        preparation: ReplayPreparation,
+    ) -> Result<Version, RepositoryError> {
+        let mut inner = self.inner.lock().expect("memory store lock poisoned");
+        if inner
+            .replay_preparations
+            .contains_key(&preparation.replay_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        if let Some(approval_ref) = preparation.approval_ref.clone() {
+            if inner
+                .replay_ready_by_dead_letter_approval
+                .contains_key(&(preparation.dead_letter_id.clone(), approval_ref.clone()))
+            {
+                return Err(RepositoryError::UniqueViolation);
+            }
+        }
+        let current_version = inner
+            .replay_preparation_versions
+            .get(&preparation.replay_id)
+            .copied()
+            .unwrap_or(0);
+        let staged = inner
+            .transactions
+            .get_mut(&transaction_id)
+            .ok_or(RepositoryError::Unavailable)?;
+        if staged
+            .replay_preparations
+            .contains_key(&preparation.replay_id)
+        {
+            return Err(RepositoryError::UniqueViolation);
+        }
+        if let Some(approval_ref) = preparation.approval_ref.clone() {
+            if staged.replay_preparations.values().any(|candidate| {
+                candidate.dead_letter_id == preparation.dead_letter_id
+                    && candidate.approval_ref == Some(approval_ref.clone())
+            }) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+        }
+
+        let mut staged_preparation = preparation;
+        staged_preparation.set_version(current_version + 1);
+        let new_version = staged_preparation.version();
+        staged
+            .replay_preparations
+            .insert(staged_preparation.replay_id.clone(), staged_preparation);
+
+        Ok(new_version)
+    }
+
+    /// Returns one committed replay preparation.
+    pub fn replay_preparation(
+        &self,
+        replay_preparation_id: &ReplayPreparationId,
+    ) -> Option<ReplayPreparation> {
+        self.inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .replay_preparations
+            .get(replay_preparation_id)
             .cloned()
     }
 
@@ -268,6 +645,27 @@ impl SharedMemoryStore {
             .expect("memory store lock poisoned")
             .audits
             .clone()
+    }
+
+    /// Loads one committed audit chain by reference.
+    pub fn audit_chain(&self, chain_ref: &bus_contracts::metadata::AuditChainRef) -> AuditChain {
+        let entries = self
+            .inner
+            .lock()
+            .expect("memory store lock poisoned")
+            .audits
+            .iter()
+            .filter(|entry| {
+                bus_contracts::metadata::AuditChainRef::from_audit_ref(&entry.audit_ref)
+                    == *chain_ref
+            })
+            .cloned()
+            .collect();
+
+        AuditChain {
+            chain_ref: chain_ref.clone(),
+            entries,
+        }
     }
 
     /// Stages a new feedback result insert.

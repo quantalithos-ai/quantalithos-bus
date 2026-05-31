@@ -533,6 +533,16 @@ mod tests {
                 .push(entry);
             Ok(next_sequence)
         }
+
+        async fn load_chain(
+            &self,
+            chain_ref: &bus_contracts::metadata::AuditChainRef,
+        ) -> Result<bus_domain::audit::AuditChain, crate::errors::RepositoryError> {
+            Ok(bus_domain::audit::AuditChain {
+                chain_ref: chain_ref.clone(),
+                entries: Vec::new(),
+            })
+        }
     }
 
     #[derive(Clone)]

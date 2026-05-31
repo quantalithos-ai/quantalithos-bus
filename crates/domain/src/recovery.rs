@@ -2,10 +2,10 @@
 
 use bus_contracts::metadata::{
     ActorContext, AttemptCount, AttemptLimit, AuditChainRef, AuditRef, CloseReason, DeadLetterId,
-    DeadLetterRef, DeadLetterStatus, DeliveryHistoryRef, DeliveryStatus, FailureMaterialId,
-    FailureReason, RecoveryPolicyConfigRef, RecoveryPolicyRef, RecoveryReason, ReplayApprovalRef,
-    ReplayPreparationId, ReplayPreparationRef, ReplayPreparationStatus, ReplayRejectReason,
-    RetryPlanId, RetryPlanStatus, RetryPolicyRef, Timestamp, Version,
+    DeadLetterRef, DeadLetterStatus, DeliveryAttemptId, DeliveryHistoryRef, DeliveryStatus,
+    FailureMaterialId, FailureReason, RecoveryPolicyConfigRef, RecoveryPolicyRef, RecoveryReason,
+    ReplayApprovalRef, ReplayPreparationId, ReplayPreparationRef, ReplayPreparationStatus,
+    ReplayRejectReason, RetryPlanId, RetryPlanStatus, RetryPolicyRef, Timestamp, Version,
 };
 
 use crate::audit::BusAuditEntry;
@@ -75,6 +75,31 @@ impl RetryPlan {
     /// Returns whether the retry plan still has remaining attempts.
     pub fn has_remaining_attempts(&self) -> bool {
         self.status == RetryPlanStatus::Scheduled && self.remaining_attempts.get() > 0
+    }
+
+    /// Returns the associated delivery identifier.
+    pub fn delivery_id(&self) -> &bus_contracts::metadata::DeliveryId {
+        &self.delivery_id
+    }
+
+    /// Records one executed retry attempt while keeping the plan scheduled.
+    pub fn mark_attempted(
+        &mut self,
+        attempt_id: DeliveryAttemptId,
+        _result: bus_contracts::metadata::BackendDeliveryResult,
+    ) -> Result<(), DomainError> {
+        if self.status != RetryPlanStatus::Scheduled {
+            return Err(DomainError::RetryNotAllowed);
+        }
+        if attempt_id.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidRetryPlan("attempt_id"));
+        }
+        if self.remaining_attempts.get() == 0 {
+            return Err(DomainError::RetryExhaustedCannotDispatch);
+        }
+
+        self.remaining_attempts = AttemptCount::new(self.remaining_attempts.get() - 1);
+        Ok(())
     }
 
     /// Marks the retry plan as exhausted once no remaining attempts exist.

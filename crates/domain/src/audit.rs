@@ -1,8 +1,8 @@
 //! Audit records for publication write-path decisions.
 
 use bus_contracts::metadata::{
-    ActorContext, AuditRef, DeliveryId, FailureReason, FeedbackStatus, IdempotencyKey,
-    PublicationId, Timestamp,
+    ActorContext, AuditChainRef, AuditRef, DeadLetterId, DeliveryId, FailureReason, FeedbackStatus,
+    IdempotencyKey, PublicationId, ReplayPreparationId, RetryPlanId, Timestamp,
 };
 
 use crate::idempotency::IdempotencyScope;
@@ -15,6 +15,12 @@ pub enum SubjectRef {
     Publication(PublicationId),
     /// A delivery progression subject.
     Delivery(DeliveryId),
+    /// A retry-plan subject.
+    RetryPlan(RetryPlanId),
+    /// A dead-letter subject.
+    DeadLetter(DeadLetterId),
+    /// A replay-preparation subject.
+    ReplayPreparation(ReplayPreparationId),
     /// An idempotency key scoped by operation.
     IdempotencyKey {
         /// The idempotency scope.
@@ -39,12 +45,38 @@ pub enum AuditAction {
     DeliveryFailed(FailureReason),
     /// Feedback was recorded for a delivery.
     FeedbackRecorded(FeedbackStatus),
+    /// A retry plan was scheduled.
+    RetryRequested,
+    /// A retry attempt was executed.
+    RetryAttempted,
+    /// A retry plan was exhausted.
+    RetryExhausted,
+    /// A dead-letter entry was created.
+    DeadLetterCreated,
+    /// A replay preparation became ready.
+    ReplayPreparationReady,
     /// A backend signal was ignored because no committed delivery truth matched it.
     BackendSignalIgnored,
     /// A timeout signal was ignored because no committed delivery truth matched it.
     TimeoutSignalIgnored,
     /// A request reused an idempotency key with a different digest.
     IdempotencyConflict,
+}
+
+/// One auditable recovery chain loaded by reference.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditChain {
+    /// The stable chain reference.
+    pub chain_ref: AuditChainRef,
+    /// The committed audit entries that belong to the chain.
+    pub entries: Vec<BusAuditEntry>,
+}
+
+impl AuditChain {
+    /// Returns whether the chain contains at least one committed entry.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 /// An append-only bus audit entry.

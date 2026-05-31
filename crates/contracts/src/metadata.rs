@@ -143,6 +143,7 @@ string_newtype!(
     DeliveryScanCursor,
     "A cursor for schedulable delivery scans."
 );
+string_newtype!(RetryScanCursor, "A cursor for due retry-plan scans.");
 string_newtype!(
     DeliveryTransitionRuleRef,
     "A reference to the delivery transition rule set."
@@ -299,6 +300,16 @@ impl HistoryReason {
     pub fn feedback_timeout() -> Self {
         Self::new("feedback_timeout")
     }
+
+    /// Returns the stable reason for a retry-driven failed-to-scheduled transition.
+    pub fn retry_rescheduled() -> Self {
+        Self::new("retry_rescheduled")
+    }
+
+    /// Returns the stable reason for a dead-letter transition.
+    pub fn dead_lettered() -> Self {
+        Self::new("dead_lettered")
+    }
 }
 
 impl FailureReason {
@@ -326,6 +337,19 @@ impl Default for OutboxCursor {
 
 impl OutboxCursor {
     /// Returns the stable origin cursor for a fresh source scan.
+    pub fn origin() -> Self {
+        Self::new("origin")
+    }
+}
+
+impl Default for RetryScanCursor {
+    fn default() -> Self {
+        Self::origin()
+    }
+}
+
+impl RetryScanCursor {
+    /// Returns the stable origin cursor for a fresh retry-plan scan.
     pub fn origin() -> Self {
         Self::new("origin")
     }

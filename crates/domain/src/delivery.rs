@@ -241,6 +241,22 @@ impl DeliveryRecord {
         Ok(())
     }
 
+    /// Reschedules one failed delivery for a controlled retry flow.
+    pub fn reschedule_for_retry(&mut self, _actor: ActorContext) -> Result<(), DomainError> {
+        if self.status != DeliveryStatus::Failed {
+            return Err(DomainError::RetryNotAllowed);
+        }
+        if !self.can_transition_to(DeliveryStatus::Scheduled) {
+            return Err(DomainError::InvalidDeliveryTransition {
+                from: self.status,
+                to: DeliveryStatus::Scheduled,
+            });
+        }
+
+        self.status = DeliveryStatus::Scheduled;
+        Ok(())
+    }
+
     /// Marks the failed delivery as dead-lettered by one recovery flow.
     pub fn mark_dead_lettered(
         &mut self,

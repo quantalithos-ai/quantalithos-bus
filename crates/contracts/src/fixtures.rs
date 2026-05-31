@@ -9,7 +9,8 @@ use crate::events::{
     CommittedOutboxFactPage, DeliveryTimeoutSignalInput,
 };
 use crate::jobs::{
-    DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
+    DeliveryProgressionResult, OutboxRelayJobResult, RetryCycleResult, RunDeliveryProgressionJob,
+    RunOutboxRelayJob, RunRetryCycleJob,
 };
 use crate::metadata::{
     ActorContext, ActorKind, ActorRef, AttemptCount, AttemptLimit, AuditChainRef,
@@ -22,8 +23,8 @@ use crate::metadata::{
     JobMetadata, JobRunId, JobTriggerSource, OperatorNoteRef, OutboxCursor, PayloadDigest,
     PayloadKind, PayloadRef, PublicationId, ReplayApprovalRef, ReplayPreparationId,
     ReplayPreparationStatus, ReplayReason, RequestId, RequestMetadata, RequestOrigin, RetryPlanId,
-    RetryPlanStatus, RetryPolicyRef, RetryRequestReason, SourceRecordRef, SourceSystem,
-    TargetScope, TimeoutReason, Timestamp, TraceId,
+    RetryPlanStatus, RetryPolicyRef, RetryRequestReason, RetryScanCursor, SourceRecordRef,
+    SourceSystem, TargetScope, TimeoutReason, Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
 use crate::receipts::{
@@ -562,6 +563,11 @@ impl RecoveryFixtureBuilder {
         ReplayApprovalRef::new(format!("approval_{}", self.run.run_id))
     }
 
+    /// Returns the stable origin cursor for retry-plan scans.
+    pub fn retry_cursor(&self) -> RetryScanCursor {
+        RetryScanCursor::origin()
+    }
+
     /// Returns a retry command for the provided delivery identifier.
     pub fn request_retry_command(&self, delivery_id: DeliveryId) -> RequestRetryCommand {
         RequestRetryCommand {
@@ -635,6 +641,27 @@ impl RecoveryFixtureBuilder {
             dead_letter_id,
             replay_preparation_status: ReplayPreparationStatus::Ready,
             audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a retry-cycle job input DTO fixture.
+    pub fn run_retry_cycle_job(&self) -> RunRetryCycleJob {
+        RunRetryCycleJob {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            cursor: self.retry_cursor(),
+            batch_size: 50,
+            now: Timestamp::new("2026-05-31T00:05:00Z"),
+        }
+    }
+
+    /// Returns a retry-cycle summary DTO fixture.
+    pub fn retry_cycle_result(&self) -> RetryCycleResult {
+        RetryCycleResult {
+            job_run_id: JobRunId::new(format!("job_run_{}", self.run.run_id)),
+            scanned: 3,
+            retried: 2,
+            exhausted: 1,
+            next_cursor: RetryScanCursor::new(format!("retry_cursor_next_{}", self.run.run_id)),
         }
     }
 }
@@ -1004,6 +1031,22 @@ mod tests {
         let builder = OutboxFixtureBuilder::new(run);
 
         roundtrip(&builder.outbox_relay_result());
+    }
+
+    #[test]
+    fn run_retry_cycle_job_roundtrip() {
+        let run = TestRunBuilder::new("job-005").build();
+        let builder = RecoveryFixtureBuilder::new(run);
+
+        roundtrip(&builder.run_retry_cycle_job());
+    }
+
+    #[test]
+    fn retry_cycle_result_roundtrip() {
+        let run = TestRunBuilder::new("job-006").build();
+        let builder = RecoveryFixtureBuilder::new(run);
+
+        roundtrip(&builder.retry_cycle_result());
     }
 
     #[test]

@@ -1,0 +1,13 @@
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running tests/recovery.rs (target/debug/deps/recovery-8ba70bf756191fc1)
+
+running 5 tests
+test request_retry_commits_scheduled_plan_with_remaining_attempts ... ok
+test prepare_replay_requires_a_non_blank_approval_reference ... ok
+test prepare_replay_rejects_unknown_audit_chain_without_creating_ready_state ... ok
+test prepare_replay_commits_ready_preparation_after_dead_letter ... ok
+test move_to_dead_letter_links_existing_failure_material_and_updates_delivery ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

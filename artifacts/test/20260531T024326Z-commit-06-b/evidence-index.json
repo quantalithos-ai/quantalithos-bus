@@ -1,0 +1,15 @@
+{
+  "run_id": "20260531T024326Z-commit-06-b",
+  "suite": "recovery",
+  "artifacts": [
+    "meta/context.json",
+    "suites/recovery/fmt.log",
+    "suites/recovery/cargo-check.log",
+    "suites/recovery/application.log",
+    "suites/recovery/jobs.log",
+    "suites/recovery/workspace.log"
+  ],
+  "reports": [
+    "reports/runs/20260531T024326Z-commit-06-b/evidence/EV-BUS-REC.md"
+  ]
+}

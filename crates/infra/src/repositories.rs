@@ -5,20 +5,22 @@ use std::sync::{Arc, Mutex};
 
 use bus_application::{
     AuditTrailRepository, BackendCapabilityReport, BackendDispatchContext, DeliveryRepository,
-    FeedbackRepository, IdempotencyRepository, PublicationRepository, RepositoryError,
-    TransportBackendPort, TransportPortError, UnitOfWorkHandle,
+    FeedbackRepository, IdempotencyRepository, PublicationRepository, RecoveryRepository,
+    RepositoryError, TransportBackendPort, TransportPortError, UnitOfWorkHandle,
 };
 use bus_contracts::events::BackendDeliverySignalInput;
 use bus_contracts::metadata::{
-    BackendCapabilityRef, BackendDeliveryRef, BackendStatus, DeliveryId, DeliveryScanCursor,
-    FeedbackId, IdempotencyKey, PublicationId, Version,
+    AuditChainRef, BackendCapabilityRef, BackendDeliveryRef, BackendStatus, DeadLetterId,
+    DeliveryId, DeliveryScanCursor, FailureMaterialId, FeedbackId, IdempotencyKey, PageLimit,
+    PublicationId, ReplayPreparationId, RetryPlanId, RetryScanCursor, Timestamp, Version,
 };
-use bus_domain::audit::BusAuditEntry;
+use bus_domain::audit::{AuditChain, BusAuditEntry};
 use bus_domain::backend::BackendCapabilityPolicy;
 use bus_domain::delivery::{DeliveryHistoryEntry, DeliveryRecord};
 use bus_domain::feedback::FeedbackResult;
 use bus_domain::idempotency::{IdempotencyAnchor, IdempotencyConflict, IdempotencyScope};
 use bus_domain::publication::PublicationAcceptance;
+use bus_domain::recovery::{DeadLetterEntry, FailureMaterial, ReplayPreparation, RetryPlan};
 
 use crate::store::SharedMemoryStore;
 
@@ -161,6 +163,10 @@ impl AuditTrailRepository for InMemoryAuditTrailRepository {
 
         self.store.stage_audit_entry(uow.transaction_id, entry)
     }
+
+    async fn load_chain(&self, chain_ref: &AuditChainRef) -> Result<AuditChain, RepositoryError> {
+        Ok(self.store.audit_chain(chain_ref))
+    }
 }
 
 /// In-memory feedback repository.
@@ -262,6 +268,117 @@ impl DeliveryRepository for InMemoryDeliveryRepository {
             .delivery(delivery_id)
             .map(|delivery| delivery.history().to_vec())
             .unwrap_or_default())
+    }
+}
+
+/// In-memory recovery repository.
+#[derive(Clone)]
+pub struct InMemoryRecoveryRepository {
+    store: SharedMemoryStore,
+}
+
+impl InMemoryRecoveryRepository {
+    /// Creates a new repository over the shared memory store.
+    pub fn new(store: SharedMemoryStore) -> Self {
+        Self { store }
+    }
+
+    /// Seeds committed failure material for tests.
+    pub fn seed_failure_material(
+        &self,
+        material: FailureMaterial,
+    ) -> Result<Version, RepositoryError> {
+        self.store.seed_failure_material(material)
+    }
+
+    /// Seeds a committed retry plan for tests.
+    pub fn seed_retry_plan(&self, retry_plan: RetryPlan) -> Result<Version, RepositoryError> {
+        self.store.seed_retry_plan(retry_plan)
+    }
+
+    /// Seeds a committed dead-letter entry for tests.
+    pub fn seed_dead_letter(&self, entry: DeadLetterEntry) -> Result<Version, RepositoryError> {
+        self.store.seed_dead_letter(entry)
+    }
+
+    /// Returns one committed retry plan for tests.
+    pub fn committed_retry_plan(&self, retry_plan_id: &RetryPlanId) -> Option<RetryPlan> {
+        self.store.retry_plan(retry_plan_id)
+    }
+
+    /// Returns one committed dead-letter entry for tests.
+    pub fn committed_dead_letter(&self, dead_letter_id: &DeadLetterId) -> Option<DeadLetterEntry> {
+        self.store.dead_letter(dead_letter_id)
+    }
+
+    /// Returns one committed replay preparation for tests.
+    pub fn committed_replay_preparation(
+        &self,
+        replay_preparation_id: &ReplayPreparationId,
+    ) -> Option<ReplayPreparation> {
+        self.store.replay_preparation(replay_preparation_id)
+    }
+
+    /// Returns one committed failure material for tests.
+    pub fn committed_failure_material(
+        &self,
+        failure_material_id: &FailureMaterialId,
+    ) -> Option<FailureMaterial> {
+        self.store.failure_material(failure_material_id)
+    }
+}
+
+impl RecoveryRepository for InMemoryRecoveryRepository {
+    async fn save_retry_plan(
+        &self,
+        retry_plan: RetryPlan,
+        expected_version: Option<Version>,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<Version, RepositoryError> {
+        self.store
+            .stage_retry_plan_save(uow.transaction_id, retry_plan, expected_version)
+    }
+
+    async fn find_due_retry(
+        &self,
+        cursor: RetryScanCursor,
+        limit: PageLimit,
+        now: Timestamp,
+    ) -> Result<Vec<RetryPlan>, RepositoryError> {
+        Ok(self.store.due_retry_plans(&cursor, limit, &now))
+    }
+
+    async fn save_dead_letter(
+        &self,
+        entry: DeadLetterEntry,
+        material: FailureMaterial,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<Version, RepositoryError> {
+        self.store
+            .stage_dead_letter_save(uow.transaction_id, entry, material)
+    }
+
+    async fn get_dead_letter(
+        &self,
+        dead_letter_id: &DeadLetterId,
+    ) -> Result<Option<DeadLetterEntry>, RepositoryError> {
+        Ok(self.store.dead_letter(dead_letter_id))
+    }
+
+    async fn save_replay_preparation(
+        &self,
+        preparation: ReplayPreparation,
+        uow: &UnitOfWorkHandle,
+    ) -> Result<Version, RepositoryError> {
+        self.store
+            .stage_replay_preparation_save(uow.transaction_id, preparation)
+    }
+
+    async fn get_failure_material(
+        &self,
+        failure_material_id: &FailureMaterialId,
+    ) -> Result<Option<FailureMaterial>, RepositoryError> {
+        Ok(self.store.failure_material(failure_material_id))
     }
 }
 
