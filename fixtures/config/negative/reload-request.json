@@ -1,0 +1,5 @@
+{
+  "operation": "reload",
+  "requested_by": "release-gate-smoke",
+  "reason": "verify_p0_rejects_runtime_reload"
+}

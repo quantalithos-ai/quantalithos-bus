@@ -1,0 +1,61 @@
+{
+  "store": {
+    "kind": "in_memory",
+    "connection_ref": null
+  },
+  "outbox_source": {
+    "kind": "in_memory_fixture",
+    "cursor_profile": "local-memory-cursor",
+    "batch_size": 100
+  },
+  "transport_backend": {
+    "kind": "in_memory",
+    "capability_profile_ref": "in-memory-backend",
+    "secret_ref": null,
+    "timeout_profile": "local-fast"
+  },
+  "publisher": {
+    "kind": "in_memory_sink",
+    "secret_ref": null,
+    "timeout_profile": "local-fast"
+  },
+  "api": {
+    "enabled": false,
+    "bind_profile": "local-http",
+    "request_timeout_ms": 3000
+  },
+  "worker": {
+    "enabled": false,
+    "poll_interval_ms": 1000,
+    "batch_size": 100,
+    "timeout_profile": "local-fast"
+  },
+  "jobs": {
+    "batch_size": 100,
+    "cursor_profile": "local-memory-cursor",
+    "retry_profile": "conservative-local"
+  },
+  "projection": {
+    "kind": "in_memory",
+    "rebuild_mode": "manual_job_only",
+    "consistency_marker": "required"
+  },
+  "recovery_policy": {
+    "retry_profile": "conservative-local",
+    "dead_letter_policy": "explicit_only",
+    "replay_requires_audit_chain": "required"
+  },
+  "security_boundary": {
+    "secret_policy": "ref_only",
+    "payload_body_policy": "reject",
+    "projection_truth_write_policy": "reject",
+    "redaction_policy": "required",
+    "privileged_operation_ref_policy": "required"
+  },
+  "clock": {
+    "kind": "fixed"
+  },
+  "id_generator": {
+    "kind": "deterministic"
+  }
+}

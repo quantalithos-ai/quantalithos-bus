@@ -8,7 +8,7 @@ print_help() {
     cat <<'EOF'
 Usage: generate_reports.sh --run-id <run_id> [--artifact-root <path>] [--report-root <path>]
 
-Generate the run report skeleton for a fixed run id.
+Generate run reports for a fixed run id from release-gate artifacts.
 
 Options:
   --run-id <run_id>            Fixed run identifier.
@@ -46,77 +46,609 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+require_command jq
+
 ensure_run_id "${run_id}"
 [[ -n "${artifact_root}" ]] || artifact_root=$(default_artifact_root "${run_id}")
 ensure_artifact_root_shape "${artifact_root}"
 ensure_report_root_shape "${report_root}"
-[[ -d "${artifact_root}" ]] || die "artifact root does not exist: ${artifact_root}"
 
-report_dir="${report_root}/runs/${run_id}"
+repo_root=$(repo_root)
+artifact_root_abs="${repo_root}/${artifact_root}"
+report_root_abs="${repo_root}/${report_root}"
+report_dir="${report_root_abs}/runs/${run_id}"
+context_file="${artifact_root_abs}/meta/context.json"
+fixture_summary_file="${artifact_root_abs}/fixtures/fixture-summary.json"
+gate_results_file="${artifact_root_abs}/meta/gate-results.json"
+evidence_index_file="${artifact_root_abs}/evidence-index.json"
+
 ensure_directory "${report_dir}/suites"
 ensure_directory "${report_dir}/evidence"
+ensure_file "${context_file}"
 
-write_text_file "${report_dir}/summary.md" \
-    "# Run Summary" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Artifact Root: ${artifact_root}" \
-    "- Status: draft"
+suite_report_file() {
+    local suite_name=${1:?suite name is required}
+    printf '%s\n' "${artifact_root_abs}/suites/${suite_name}/report.json"
+}
 
-write_text_file "${report_dir}/evidence-index.md" \
-    "# Evidence Index" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Source Artifact Root: ${artifact_root}" \
-    "- Status: draft"
+suite_status() {
+    local suite_name=${1:?suite name is required}
+    local report_file
 
-write_text_file "${report_dir}/gate-results.md" \
-    "# Gate Results" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Result: draft"
+    report_file=$(suite_report_file "${suite_name}")
+    if [[ ! -f "${report_file}" ]]; then
+        printf 'missing\n'
+        return 0
+    fi
 
-write_text_file "${report_dir}/coverage-matrix.md" \
-    "# Coverage Matrix" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Status: draft"
+    jq -r '.status' "${report_file}"
+}
 
-write_text_file "${report_dir}/config-summary.md" \
-    "# Config Summary" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Config Profile: draft" \
-    "- Redaction Policy: enforced"
+aggregate_status() {
+    local status="passed"
+    local suite_name suite_status_value
 
-write_text_file "${report_dir}/redaction-check.md" \
-    "# Redaction Check" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Status: pending"
+    for suite_name in "$@"; do
+        suite_status_value=$(suite_status "${suite_name}")
+        if [[ "${suite_status_value}" == "failed" ]]; then
+            printf 'failed\n'
+            return 0
+        fi
+        if [[ "${suite_status_value}" == "missing" ]]; then
+            status="pending"
+        fi
+    done
 
-write_text_file "${report_dir}/artifact-index.md" \
-    "# Artifact Index" \
-    "" \
-    "- Artifact Root: ${artifact_root}" \
-    "- Status: draft"
+    printf '%s\n' "${status}"
+}
 
-write_text_file "${report_dir}/suites/bootstrap.md" \
-    "# Bootstrap Suite" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Status: draft"
+suite_title() {
+    case "$1" in
+        publication) printf 'Publication Suite\n' ;;
+        semantic) printf 'Semantic Suite\n' ;;
+        delivery) printf 'Delivery Suite\n' ;;
+        feedback) printf 'Feedback Suite\n' ;;
+        output) printf 'Output Suite\n' ;;
+        outbox) printf 'Outbox Suite\n' ;;
+        backend) printf 'Backend Suite\n' ;;
+        recovery) printf 'Recovery Suite\n' ;;
+        config) printf 'Config Suite\n' ;;
+        redaction) printf 'Redaction Suite\n' ;;
+        report) printf 'Report Suite\n' ;;
+        *) printf '%s Suite\n' "$1" ;;
+    esac
+}
 
-write_text_file "${report_dir}/suites/config.md" \
-    "# Config Suite" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Status: draft"
+suite_gate() {
+    case "$1" in
+        publication|semantic|delivery|feedback|output|outbox|backend) printf 'bus-release-closed-loop\n' ;;
+        recovery) printf 'bus-release-recovery\n' ;;
+        config) printf 'bus-release-config-runtime\n' ;;
+        redaction) printf 'bus-release-redaction\n' ;;
+        report) printf 'bus-release-report\n' ;;
+        *) printf 'unknown\n' ;;
+    esac
+}
 
-write_text_file "${report_dir}/evidence/EV-BUS-CFG.md" \
-    "# EV-BUS-CFG" \
-    "" \
-    "- Run ID: ${run_id}" \
-    "- Status: draft"
+suite_case_ids() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ -f "${report_file}" ]]; then
+        jq -r '.case_ids | join(", ")' "${report_file}"
+    else
+        printf 'none\n'
+    fi
+}
 
-printf 'Generated report skeleton at %s\n' "${report_dir}"
+suite_evidence_ids() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ -f "${report_file}" ]]; then
+        jq -r '.evidence_ids | join(", ")' "${report_file}"
+    else
+        printf 'none\n'
+    fi
+}
+
+suite_commands() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ ! -f "${report_file}" ]]; then
+        return 0
+    fi
+
+    jq -r '.commands[]' "${report_file}"
+}
+
+suite_stdout_path() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ -f "${report_file}" ]]; then
+        jq -r '.stdout_path' "${report_file}"
+    else
+        printf 'pending\n'
+    fi
+}
+
+suite_stderr_path() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ -f "${report_file}" ]]; then
+        jq -r '.stderr_path' "${report_file}"
+    else
+        printf 'pending\n'
+    fi
+}
+
+suite_duration_ms() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ -f "${report_file}" ]]; then
+        jq -r '.duration_ms' "${report_file}"
+    else
+        printf '0\n'
+    fi
+}
+
+suite_failed_command() {
+    local report_file
+    report_file=$(suite_report_file "$1")
+    if [[ -f "${report_file}" ]]; then
+        jq -r '.failed_command // "none"' "${report_file}"
+    else
+        printf 'pending\n'
+    fi
+}
+
+write_gate_results_json() {
+    local release_closed_status release_recovery_status release_config_status release_redaction_status release_report_status release_status
+
+    release_closed_status=$(aggregate_status publication semantic delivery feedback output outbox backend)
+    release_recovery_status=$(aggregate_status recovery)
+    release_config_status=$(aggregate_status config)
+    release_redaction_status=$(aggregate_status redaction)
+    release_report_status=$(aggregate_status report)
+    release_status=$(aggregate_status publication semantic delivery feedback output outbox backend recovery config redaction report)
+
+    cat >"${gate_results_file}" <<EOF
+{
+  "run_id": "${run_id}",
+  "gates": [
+    {
+      "gate": "pr",
+      "status": "not_run",
+      "suites": [
+        "bus-unit",
+        "bus-service",
+        "bus-contract",
+        "bus-config",
+        "bus-redaction-smoke",
+        "bus-integration-fast"
+      ]
+    },
+    {
+      "gate": "main-ci",
+      "status": "not_run",
+      "suites": [
+        "bus-integration-full",
+        "bus-worker-consumer",
+        "bus-job-runner",
+        "bus-report-smoke"
+      ]
+    },
+    {
+      "gate": "release",
+      "status": "${release_status}",
+      "suites": [
+        {
+          "name": "bus-release-closed-loop",
+          "status": "${release_closed_status}",
+          "artifact_suites": [
+            "publication",
+            "semantic",
+            "delivery",
+            "feedback",
+            "output",
+            "outbox",
+            "backend"
+          ]
+        },
+        {
+          "name": "bus-release-recovery",
+          "status": "${release_recovery_status}",
+          "artifact_suites": [
+            "recovery"
+          ]
+        },
+        {
+          "name": "bus-release-config-runtime",
+          "status": "${release_config_status}",
+          "artifact_suites": [
+            "config"
+          ]
+        },
+        {
+          "name": "bus-release-redaction",
+          "status": "${release_redaction_status}",
+          "artifact_suites": [
+            "redaction"
+          ]
+        },
+        {
+          "name": "bus-release-report",
+          "status": "${release_report_status}",
+          "artifact_suites": [
+            "report"
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+}
+
+write_evidence_index_json() {
+    cat >"${evidence_index_file}" <<EOF
+{
+  "run_id": "${run_id}",
+  "phase": "PH-08",
+  "commit_boundary": "commit-08-a",
+  "artifact_root": "${artifact_root}",
+  "report_root": "${report_root}",
+  "families": [
+    {
+      "family": "EV-BUS-PUB",
+      "suite": "publication",
+      "case_ids": ["TC-BUS-PUB-001", "TC-BUS-PUB-002", "TC-BUS-PUB-003", "TC-BUS-PUB-004"],
+      "evidence_ids": ["EV-BUS-PUB-001", "EV-BUS-PUB-002", "EV-BUS-PUB-003", "EV-BUS-PUB-004"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-PUB.md"
+    },
+    {
+      "family": "EV-BUS-SEM",
+      "suite": "semantic",
+      "case_ids": ["TC-BUS-SEM-001", "TC-BUS-SEM-002"],
+      "evidence_ids": ["EV-BUS-SEM-001", "EV-BUS-SEM-002"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-SEM.md"
+    },
+    {
+      "family": "EV-BUS-DLV",
+      "suite": "delivery",
+      "case_ids": ["TC-BUS-DLV-001", "TC-BUS-DLV-002", "TC-BUS-DLV-003", "TC-BUS-DLV-004"],
+      "evidence_ids": ["EV-BUS-DLV-001", "EV-BUS-DLV-002", "EV-BUS-DLV-003", "EV-BUS-DLV-004"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-DLV.md"
+    },
+    {
+      "family": "EV-BUS-FDB",
+      "suite": "feedback",
+      "case_ids": ["TC-BUS-FDB-001", "TC-BUS-FDB-002", "TC-BUS-FDB-003", "TC-BUS-FDB-004"],
+      "evidence_ids": ["EV-BUS-FDB-001", "EV-BUS-FDB-002", "EV-BUS-FDB-003", "EV-BUS-FDB-004"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-FDB.md"
+    },
+    {
+      "family": "EV-BUS-REC",
+      "suite": "recovery",
+      "case_ids": ["TC-BUS-REC-001", "TC-BUS-REC-002", "TC-BUS-REC-003", "TC-BUS-REC-004"],
+      "evidence_ids": ["EV-BUS-REC-001", "EV-BUS-REC-002", "EV-BUS-REC-003", "EV-BUS-REC-004"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-REC.md"
+    },
+    {
+      "family": "EV-BUS-OUT",
+      "suite": "output",
+      "case_ids": ["TC-BUS-OUT-001", "TC-BUS-OUT-002", "TC-BUS-OUT-003", "TC-BUS-OUT-004", "TC-BUS-OUT-005", "TC-BUS-OUT-006"],
+      "evidence_ids": ["EV-BUS-OUT-001", "EV-BUS-OUT-002", "EV-BUS-OUT-003", "EV-BUS-OUT-004", "EV-BUS-OUT-005", "EV-BUS-OUT-006"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-OUT.md"
+    },
+    {
+      "family": "EV-BUS-OBX",
+      "suite": "outbox",
+      "case_ids": ["TC-BUS-OBX-001", "TC-BUS-OBX-002"],
+      "evidence_ids": ["EV-BUS-OBX-001", "EV-BUS-OBX-002"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-OBX.md"
+    },
+    {
+      "family": "EV-BUS-BND",
+      "suite": "backend",
+      "case_ids": ["TC-BUS-BND-001", "TC-BUS-BND-002", "TC-BUS-BND-003"],
+      "evidence_ids": ["EV-BUS-BND-001", "EV-BUS-BND-002", "EV-BUS-BND-003"],
+      "report": "reports/runs/${run_id}/evidence/EV-BUS-BND.md"
+    },
+    {
+      "family": "EV-BUS-CFG",
+      "suite": "config",
+      "case_ids": ["TC-BUS-CFG-001", "TC-BUS-CFG-002", "TC-BUS-CFG-003"],
+      "evidence_ids": ["EV-BUS-CFG-001", "EV-BUS-CFG-002", "EV-BUS-CFG-003"],
+      "report": "reports/runs/${run_id}/config-summary.md"
+    },
+    {
+      "family": "RP-BUS-RED",
+      "suite": "redaction",
+      "case_ids": ["TC-BUS-RED-001"],
+      "evidence_ids": ["RP-BUS-RED-001"],
+      "report": "reports/runs/${run_id}/redaction-check.md"
+    },
+    {
+      "family": "RP-BUS-SUM",
+      "suite": "report",
+      "case_ids": ["TC-BUS-RED-002"],
+      "evidence_ids": ["RP-BUS-SUM-001"],
+      "report": "reports/acceptance/${run_id}-index.md"
+    }
+  ]
+}
+EOF
+}
+
+write_summary_md() {
+    local design_repo_commit workspace_commit config_profile release_status acceptance_index_path
+
+    design_repo_commit=$(jq -r '.design_repo_commit' "${context_file}")
+    workspace_commit=$(jq -r '.workspace_commit' "${context_file}")
+    config_profile=$(jq -r '.config_profile' "${context_file}")
+    release_status=$(jq -r '.gates[] | select(.gate == "release") | .status' "${gate_results_file}")
+    acceptance_index_path="reports/acceptance/${run_id}-index.md"
+
+    cat >"${report_dir}/summary.md" <<EOF
+# Run Summary
+
+- Run ID: ${run_id}
+- Phase: PH-08
+- Commit Boundary: commit-08-a
+- Release Gate Status: ${release_status}
+- Config Profile: ${config_profile}
+- Artifact Root: ${artifact_root}
+- Report Root: ${report_root}
+- Acceptance Index: ${acceptance_index_path}
+- Design Repo Commit: ${design_repo_commit}
+- Workspace Commit: ${workspace_commit}
+
+## Release Gate Suites
+
+| Release Suite | Status | Artifact Suites |
+|---|---|---|
+| bus-release-closed-loop | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-closed-loop") | .status' "${gate_results_file}") | publication, semantic, delivery, feedback, output, outbox, backend |
+| bus-release-recovery | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-recovery") | .status' "${gate_results_file}") | recovery |
+| bus-release-config-runtime | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-config-runtime") | .status' "${gate_results_file}") | config |
+| bus-release-redaction | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-redaction") | .status' "${gate_results_file}") | redaction |
+| bus-release-report | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-report") | .status' "${gate_results_file}") | report |
+
+## Evidence Entry Points
+
+- Run summary: reports/runs/${run_id}/summary.md
+- Gate results: reports/runs/${run_id}/gate-results.md
+- Coverage matrix: reports/runs/${run_id}/coverage-matrix.md
+- Evidence index: reports/runs/${run_id}/evidence-index.md
+- Artifact index: reports/runs/${run_id}/artifact-index.md
+- Config summary: reports/runs/${run_id}/config-summary.md
+- Redaction report: reports/runs/${run_id}/redaction-check.md
+EOF
+}
+
+write_gate_results_md() {
+    cat >"${report_dir}/gate-results.md" <<EOF
+# Gate Results
+
+| Gate | Status | Covered Suites |
+|---|---|---|
+| PR | $(jq -r '.gates[] | select(.gate == "pr") | .status' "${gate_results_file}") | bus-unit, bus-service, bus-contract, bus-config, bus-redaction-smoke, bus-integration-fast |
+| Main CI | $(jq -r '.gates[] | select(.gate == "main-ci") | .status' "${gate_results_file}") | bus-integration-full, bus-worker-consumer, bus-job-runner, bus-report-smoke |
+| Release | $(jq -r '.gates[] | select(.gate == "release") | .status' "${gate_results_file}") | bus-release-closed-loop, bus-release-recovery, bus-release-config-runtime, bus-release-redaction, bus-release-report |
+
+## Release Gate Details
+
+| Release Suite | Status | Artifact Suites |
+|---|---|---|
+| bus-release-closed-loop | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-closed-loop") | .status' "${gate_results_file}") | publication, semantic, delivery, feedback, output, outbox, backend |
+| bus-release-recovery | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-recovery") | .status' "${gate_results_file}") | recovery |
+| bus-release-config-runtime | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-config-runtime") | .status' "${gate_results_file}") | config |
+| bus-release-redaction | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-redaction") | .status' "${gate_results_file}") | redaction |
+| bus-release-report | $(jq -r '.gates[] | select(.gate == "release") | .suites[] | select(.name == "bus-release-report") | .status' "${gate_results_file}") | report |
+EOF
+}
+
+write_coverage_matrix_md() {
+    cat >"${report_dir}/coverage-matrix.md" <<EOF
+# Coverage Matrix
+
+| Area | Case IDs | Acceptance Coverage | Evidence | Source Suite | Status |
+|---|---|---|---|---|---|
+| Publication | TC-BUS-PUB-001, TC-BUS-PUB-002, TC-BUS-PUB-003, TC-BUS-PUB-004 | AC-FUNC-001, AC-RED-001, AC-RED-002, AC-STATE-001, AC-TX-001 | EV-BUS-PUB-001~004 | publication | $(suite_status publication) |
+| Semantic | TC-BUS-SEM-001, TC-BUS-SEM-002 | AC-FUNC-002, AC-FUNC-008, AC-STATE-002 | EV-BUS-SEM-001~002 | semantic | $(suite_status semantic) |
+| Delivery | TC-BUS-DLV-001, TC-BUS-DLV-002, TC-BUS-DLV-003, TC-BUS-DLV-004 | AC-FUNC-003, AC-STATE-002, AC-TX-003 | EV-BUS-DLV-001~004 | delivery | $(suite_status delivery) |
+| Feedback | TC-BUS-FDB-001, TC-BUS-FDB-002, TC-BUS-FDB-003, TC-BUS-FDB-004 | AC-FUNC-004, AC-IDEM-001, AC-CONC-002 | EV-BUS-FDB-001~004 | feedback | $(suite_status feedback) |
+| Recovery | TC-BUS-REC-001, TC-BUS-REC-002, TC-BUS-REC-003, TC-BUS-REC-004 | AC-FUNC-005, AC-STATE-004 | EV-BUS-REC-001~004 | recovery | $(suite_status recovery) |
+| Output | TC-BUS-OUT-001, TC-BUS-OUT-002, TC-BUS-OUT-003, TC-BUS-OUT-004, TC-BUS-OUT-005, TC-BUS-OUT-006 | AC-FUNC-006, AC-IF-002, AC-IF-004, AC-IF-009, AC-NFR-005, AC-NFR-008 | EV-BUS-OUT-001~006 | output | $(suite_status output) |
+| Outbox | TC-BUS-OBX-001, TC-BUS-OBX-002 | AC-FUNC-007, AC-IF-003, AC-IF-008, AC-TX-002, AC-IDEM-002 | EV-BUS-OBX-001~002 | outbox | $(suite_status outbox) |
+| Backend Boundary | TC-BUS-BND-001, TC-BUS-BND-002, TC-BUS-BND-003 | AC-FUNC-008, AC-IF-007, AC-NFR-004 | EV-BUS-BND-001~003 | backend | $(suite_status backend) |
+| Config Runtime | TC-BUS-CFG-001, TC-BUS-CFG-002, TC-BUS-CFG-003 | AC-FUNC-009, AC-NFR-007, AC-EVID-006 | EV-BUS-CFG-001~003 | config | $(suite_status config) |
+| Redaction And Reports | TC-BUS-RED-001, TC-BUS-RED-002 | AC-FUNC-010, AC-NFR-002, AC-NFR-009, AC-EVID-003, AC-EVID-004, AC-EVID-005, AC-EVID-007 | RP-BUS-RED-001, RP-BUS-SUM-001 | redaction, report | $(aggregate_status redaction report) |
+EOF
+}
+
+write_config_summary_md() {
+    local config_profile runtime_graph store_kind outbox_source_kind backend_kind capability_profile_ref publisher_kind api_enabled worker_enabled jobs_retry_profile projection_kind secret_policy redaction_policy
+
+    ensure_file "${fixture_summary_file}"
+
+    config_profile=$(jq -r '.config_profile' "${fixture_summary_file}")
+    store_kind=$(jq -r '.runtime_graph.store_kind' "${fixture_summary_file}")
+    outbox_source_kind=$(jq -r '.runtime_graph.outbox_source_kind' "${fixture_summary_file}")
+    backend_kind=$(jq -r '.runtime_graph.backend_kind' "${fixture_summary_file}")
+    capability_profile_ref=$(jq -r '.runtime_graph.capability_profile_ref' "${fixture_summary_file}")
+    publisher_kind=$(jq -r '.runtime_graph.publisher_kind' "${fixture_summary_file}")
+    api_enabled=$(jq -r '.runtime_graph.api_enabled' "${fixture_summary_file}")
+    worker_enabled=$(jq -r '.runtime_graph.worker_enabled' "${fixture_summary_file}")
+    jobs_retry_profile=$(jq -r '.runtime_graph.jobs_retry_profile' "${fixture_summary_file}")
+    projection_kind=$(jq -r '.runtime_graph.projection_kind' "${fixture_summary_file}")
+    secret_policy=$(jq -r '.secret_policy' "${fixture_summary_file}")
+    redaction_policy=$(jq -r '.redaction_policy' "${fixture_summary_file}")
+
+    runtime_graph="store=${store_kind}, outbox_source=${outbox_source_kind}, backend=${backend_kind}, capability=${capability_profile_ref}, publisher=${publisher_kind}, api_enabled=${api_enabled}, worker_enabled=${worker_enabled}, jobs_retry_profile=${jobs_retry_profile}, projection=${projection_kind}"
+
+    cat >"${report_dir}/config-summary.md" <<EOF
+# Config Summary
+
+- Run ID: ${run_id}
+- Config Profile: ${config_profile}
+- Runtime Graph: ${runtime_graph}
+- Secret Policy: ${secret_policy}
+- Redaction Policy: ${redaction_policy}
+- Reload Request: rejected
+- Fixture Summary: artifacts/test/${run_id}/fixtures/fixture-summary.json
+
+## Negative Cases
+
+| Case | Expected Result | Source |
+|---|---|---|
+| TC-BUS-CFG-002 unsupported key | fail-fast | fixtures/config/negative/unsupported-key.json |
+| TC-BUS-CFG-002 secret material fixture | fail-fast | fixtures/config/negative/raw-secret.json |
+| TC-BUS-CFG-003 unavailable secret provider | fail-closed | fixtures/config/negative/secret-unavailable.json |
+| TC-BUS-CFG-003 runtime reload request | rejected | fixtures/config/negative/reload-request.json |
+EOF
+}
+
+write_artifact_index_md() {
+    {
+        printf '# Artifact Index\n\n'
+        printf -- '- Artifact Root: %s\n' "${artifact_root}"
+        printf -- '- Context: %s\n' "artifacts/test/${run_id}/meta/context.json"
+        printf -- '- Gate Results JSON: %s\n' "artifacts/test/${run_id}/meta/gate-results.json"
+        printf -- '- Evidence Index JSON: %s\n' "artifacts/test/${run_id}/evidence-index.json"
+        printf -- '- Fixture Summary: %s\n' "artifacts/test/${run_id}/fixtures/fixture-summary.json"
+        printf '\n## Artifact Files\n\n'
+        while IFS= read -r file_path; do
+            printf -- '- %s\n' "${file_path}"
+        done < <(find "${artifact_root_abs}" -type f | sort | while IFS= read -r file_path; do relative_repo_path "${file_path}"; done)
+    } >"${report_dir}/artifact-index.md"
+}
+
+write_suite_md() {
+    local suite_name=${1:?suite name is required}
+    local suite_path="${report_dir}/suites/${suite_name}.md"
+    local command
+
+    {
+        printf '# %s\n\n' "$(suite_title "${suite_name}")"
+        printf -- '- Run ID: %s\n' "${run_id}"
+        printf -- '- Gate Suite: %s\n' "$(suite_gate "${suite_name}")"
+        printf -- '- Status: %s\n' "$(suite_status "${suite_name}")"
+        printf -- '- Case IDs: %s\n' "$(suite_case_ids "${suite_name}")"
+        printf -- '- Evidence IDs: %s\n' "$(suite_evidence_ids "${suite_name}")"
+        printf -- '- Duration Ms: %s\n' "$(suite_duration_ms "${suite_name}")"
+        printf -- '- Artifact Report: %s\n' "artifacts/test/${run_id}/suites/${suite_name}/report.json"
+        printf -- '- Stdout Log: %s\n' "$(suite_stdout_path "${suite_name}")"
+        printf -- '- Stderr Log: %s\n' "$(suite_stderr_path "${suite_name}")"
+        printf -- '- Failed Command: %s\n' "$(suite_failed_command "${suite_name}")"
+        printf '\n## Commands\n\n'
+        while IFS= read -r command; do
+            printf -- '- %s\n' "${command}"
+        done < <(suite_commands "${suite_name}")
+    } >"${suite_path}"
+}
+
+write_evidence_doc() {
+    local family=${1:?family is required}
+    local suite_name=${2:?suite name is required}
+    local evidence_range=${3:?evidence range is required}
+    local case_range=${4:?case range is required}
+    local summary_text=${5:?summary text is required}
+    local output_file="${report_dir}/evidence/EV-BUS-${family}.md"
+
+    {
+        printf '# EV-BUS-%s\n\n' "${family}"
+        printf -- '- Run ID: %s\n' "${run_id}"
+        printf -- '- Evidence IDs: %s\n' "${evidence_range}"
+        printf -- '- Case IDs: %s\n' "${case_range}"
+        printf -- '- Source Suite: %s\n' "${suite_name}"
+        printf -- '- Suite Status: %s\n' "$(suite_status "${suite_name}")"
+        printf -- '- Suite Report: %s\n' "artifacts/test/${run_id}/suites/${suite_name}/report.json"
+        printf -- '- Stdout Log: %s\n' "$(suite_stdout_path "${suite_name}")"
+        printf -- '- Stderr Log: %s\n' "$(suite_stderr_path "${suite_name}")"
+        printf -- '- Summary: %s\n' "${summary_text}"
+    } >"${output_file}"
+}
+
+write_evidence_index_md() {
+    cat >"${report_dir}/evidence-index.md" <<EOF
+# Evidence Index
+
+| Evidence Family | Case IDs | Artifact Suite | Run Report |
+|---|---|---|---|
+| EV-BUS-PUB-001~004 | TC-BUS-PUB-001, TC-BUS-PUB-002, TC-BUS-PUB-003, TC-BUS-PUB-004 | artifacts/test/${run_id}/suites/publication/report.json | reports/runs/${run_id}/evidence/EV-BUS-PUB.md |
+| EV-BUS-SEM-001~002 | TC-BUS-SEM-001, TC-BUS-SEM-002 | artifacts/test/${run_id}/suites/semantic/report.json | reports/runs/${run_id}/evidence/EV-BUS-SEM.md |
+| EV-BUS-DLV-001~004 | TC-BUS-DLV-001, TC-BUS-DLV-002, TC-BUS-DLV-003, TC-BUS-DLV-004 | artifacts/test/${run_id}/suites/delivery/report.json | reports/runs/${run_id}/evidence/EV-BUS-DLV.md |
+| EV-BUS-FDB-001~004 | TC-BUS-FDB-001, TC-BUS-FDB-002, TC-BUS-FDB-003, TC-BUS-FDB-004 | artifacts/test/${run_id}/suites/feedback/report.json | reports/runs/${run_id}/evidence/EV-BUS-FDB.md |
+| EV-BUS-REC-001~004 | TC-BUS-REC-001, TC-BUS-REC-002, TC-BUS-REC-003, TC-BUS-REC-004 | artifacts/test/${run_id}/suites/recovery/report.json | reports/runs/${run_id}/evidence/EV-BUS-REC.md |
+| EV-BUS-OUT-001~006 | TC-BUS-OUT-001, TC-BUS-OUT-002, TC-BUS-OUT-003, TC-BUS-OUT-004, TC-BUS-OUT-005, TC-BUS-OUT-006 | artifacts/test/${run_id}/suites/output/report.json | reports/runs/${run_id}/evidence/EV-BUS-OUT.md |
+| EV-BUS-OBX-001~002 | TC-BUS-OBX-001, TC-BUS-OBX-002 | artifacts/test/${run_id}/suites/outbox/report.json | reports/runs/${run_id}/evidence/EV-BUS-OBX.md |
+| EV-BUS-BND-001~003 | TC-BUS-BND-001, TC-BUS-BND-002, TC-BUS-BND-003 | artifacts/test/${run_id}/suites/backend/report.json | reports/runs/${run_id}/evidence/EV-BUS-BND.md |
+| EV-BUS-CFG-001~003 | TC-BUS-CFG-001, TC-BUS-CFG-002, TC-BUS-CFG-003 | artifacts/test/${run_id}/suites/config/report.json | reports/runs/${run_id}/config-summary.md |
+| RP-BUS-RED-001 | TC-BUS-RED-001 | artifacts/test/${run_id}/suites/redaction/report.json | reports/runs/${run_id}/redaction-check.md |
+| RP-BUS-SUM-001 | TC-BUS-RED-002 | artifacts/test/${run_id}/suites/report/report.json | reports/acceptance/${run_id}-index.md |
+EOF
+}
+
+write_gate_results_json
+write_evidence_index_json
+write_summary_md
+write_gate_results_md
+write_coverage_matrix_md
+write_config_summary_md
+write_artifact_index_md
+
+for suite_name in publication semantic delivery feedback output outbox backend recovery config redaction report; do
+    write_suite_md "${suite_name}"
+done
+
+write_evidence_doc \
+    PUB \
+    publication \
+    'EV-BUS-PUB-001~004' \
+    'TC-BUS-PUB-001~004' \
+    'Accepted and rejected publication write paths, idempotency reuse, and reference-only input validation are covered by the publication release suite.'
+write_evidence_doc \
+    SEM \
+    semantic \
+    'EV-BUS-SEM-001~002' \
+    'TC-BUS-SEM-001~002' \
+    'Accepted publication material, backend capability mapping, and normalized transport semantics are covered by the semantic release suite.'
+write_evidence_doc \
+    DLV \
+    delivery \
+    'EV-BUS-DLV-001~004' \
+    'TC-BUS-DLV-001~004' \
+    'Scheduled delivery progression, failure isolation, and history append behavior are covered by the delivery release suite.'
+write_evidence_doc \
+    FDB \
+    feedback \
+    'EV-BUS-FDB-001~004' \
+    'TC-BUS-FDB-001~004' \
+    'Feedback recording, duplicate replay, conflict handling, and completed delivery transitions are covered by the feedback release suite.'
+write_evidence_doc \
+    REC \
+    recovery \
+    'EV-BUS-REC-001~004' \
+    'TC-BUS-REC-001~004' \
+    'Retry planning, dead-letter movement, replay preparation, and audit-chain guards are covered by the recovery release suite.'
+write_evidence_doc \
+    OUT \
+    output \
+    'EV-BUS-OUT-001~006' \
+    'TC-BUS-OUT-001~006' \
+    'Read-only transport views, failure summaries, audit reads, and outbound publisher evidence are covered by the output release suite.'
+write_evidence_doc \
+    OBX \
+    outbox \
+    'EV-BUS-OBX-001~002' \
+    'TC-BUS-OBX-001~002' \
+    'Committed outbox source replay, source acknowledgement ordering, and relay idempotency are covered by the outbox release suite.'
+write_evidence_doc \
+    BND \
+    backend \
+    'EV-BUS-BND-001~003' \
+    'TC-BUS-BND-001~003' \
+    'Backend capability validation, unavailable dependency handling, and manual-action evidence are covered by the backend boundary release suite.'
+
+write_evidence_index_md
+
+printf 'Generated run reports at %s\n' "$(relative_repo_path "${report_dir}")"

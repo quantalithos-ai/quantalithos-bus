@@ -1,0 +1,48 @@
+$ cargo test -p bus-infra source::tests
+
+running 5 tests
+test source::tests::outbox_source_ack_failure_replays_fact_until_ack_succeeds ... ok
+test source::tests::outbox_source_fixture_rejects_duplicate_fact_ref ... ok
+test source::tests::outbox_source_acknowledges_fact_and_skips_it_on_later_polls ... ok
+test source::tests::outbox_source_polls_committed_facts_with_cursor_progression ... ok
+test source::tests::outbox_source_rejects_unknown_cursor ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ cargo test -p bus-jobs outbox_relay_job_runner
+
+running 4 tests
+test tests::outbox_relay_job_runner_maps_source_unavailable_to_retryable_error ... ok
+test tests::outbox_relay_job_runner_replays_after_ack_failure_without_duplicate_truth ... ok
+test tests::outbox_relay_job_runner_accepts_committed_batch_and_advances_cursor ... ok
+test tests::outbox_relay_job_runner_continues_after_rejected_item ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+

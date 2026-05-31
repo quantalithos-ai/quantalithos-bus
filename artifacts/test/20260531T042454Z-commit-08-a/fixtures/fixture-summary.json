@@ -1,0 +1,51 @@
+{
+  "run_id": "20260531T042454Z-commit-08-a",
+  "config_profile": "operations-recovery",
+  "profile_fixture": "fixtures/config/profiles/operations-recovery.json",
+  "status": "passed",
+  "runtime_graph": {
+    "store_kind": "in_memory",
+    "outbox_source_kind": "in_memory_fixture",
+    "backend_kind": "in_memory",
+    "capability_profile_ref": "in-memory-backend",
+    "publisher_kind": "in_memory_sink",
+    "api_enabled": false,
+    "worker_enabled": false,
+    "jobs_retry_profile": "conservative-local",
+    "projection_kind": "in_memory"
+  },
+  "secret_policy": "ref_only",
+  "redaction_policy": "required",
+  "negative_cases": [
+    {
+      "case_id": "TC-BUS-CFG-002",
+      "fixture": "fixtures/config/negative/unsupported-key.json",
+      "expected": "fail-fast",
+      "status": "rejected",
+      "reason": "unsupported key"
+    },
+    {
+      "case_id": "TC-BUS-CFG-002",
+      "fixture": "fixtures/config/negative/raw-secret.json",
+      "expected": "fail-fast",
+      "status": "rejected",
+      "reason": "secret material rejected"
+    },
+    {
+      "case_id": "TC-BUS-CFG-003",
+      "fixture": "fixtures/config/negative/secret-unavailable.json",
+      "expected": "fail-closed",
+      "status": "rejected",
+      "reason": "secret provider unavailable"
+    },
+    {
+      "case_id": "TC-BUS-CFG-003",
+      "fixture": "fixtures/config/negative/reload-request.json",
+      "expected": "rejected",
+      "status": "rejected",
+      "reason": "runtime reload is unsupported in P0"
+    }
+  ],
+  "reload_request": "rejected",
+  "failure_reason": null
+}

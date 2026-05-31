@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_domain-bca8efd304aeb827)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_jobs-53c10fca84b65a12)
+     Running unittests src/bin/check_backend_capability.rs (target/debug/deps/check_backend_capability-064574a7cad1c5de)
+     Running unittests src/bin/rebuild_projection.rs (target/debug/deps/rebuild_projection-8a8b6115f36b54cb)
+     Running unittests src/bin/run_delivery_progression.rs (target/debug/deps/run_delivery_progression-5eb0f94e39172873)
+     Running unittests src/bin/run_outbox_relay.rs (target/debug/deps/run_outbox_relay-7fc58d7589c44155)
+     Running unittests src/bin/run_retry_cycle.rs (target/debug/deps/run_retry_cycle-8a920c36a16cac71)

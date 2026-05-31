@@ -1,0 +1,30 @@
+$ cargo test -p bus-application --test output
+
+running 8 tests
+test get_failure_summary_returns_authorized_view_without_decision_content ... ok
+test get_transport_view_missing_projection_returns_not_found ... ok
+test get_bus_audit_trail_returns_append_only_monotonic_sequence ... ok
+test publish_batch_writes_transport_and_failure_material_events_to_fake_sink ... ok
+test get_transport_view_returns_committed_projection_without_writes ... ok
+test publish_committed_rejects_inline_payload_reference_before_sink_call ... ok
+test get_transport_view_returns_stale_marker_without_rebuild ... ok
+test publisher_retryable_failure_preserves_committed_projection_and_records_evidence ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ cargo test -p bus-api query
+
+running 3 tests
+test query::tests::get_transport_view_maps_not_found_to_404 ... ok
+test query::tests::get_transport_view_returns_query_view ... ok
+test query::tests::get_failure_summary_returns_api_view_without_decision_content ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+

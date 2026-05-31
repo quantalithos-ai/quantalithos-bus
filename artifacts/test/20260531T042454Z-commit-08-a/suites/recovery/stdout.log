@@ -1,0 +1,59 @@
+$ cargo test -p bus-domain recovery::tests
+
+running 6 tests
+test recovery::tests::retry_plan_rejects_non_failed_delivery ... ok
+test recovery::tests::dead_letter_entry_tracks_trusted_chain_and_review_lifecycle ... ok
+test recovery::tests::replay_preparation_rejects_closed_dead_letter_and_blank_approval ... ok
+test recovery::tests::retry_plan_mark_exhausted_requires_zero_remaining_attempts ... ok
+test recovery::tests::retry_plan_create_uses_max_attempts_for_remaining_attempts ... ok
+test recovery::tests::replay_preparation_requires_matching_trusted_chain ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+
+$ cargo test -p bus-application --test recovery
+
+running 5 tests
+test move_to_dead_letter_links_existing_failure_material_and_updates_delivery ... ok
+test prepare_replay_rejects_unknown_audit_chain_without_creating_ready_state ... ok
+test prepare_replay_requires_a_non_blank_approval_reference ... ok
+test request_retry_commits_scheduled_plan_with_remaining_attempts ... ok
+test prepare_replay_commits_ready_preparation_after_dead_letter ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ cargo test -p bus-jobs retry_cycle_job_runner
+
+running 2 tests
+test tests::retry_cycle_job_runner_marks_zero_budget_plan_as_exhausted ... ok
+test tests::retry_cycle_job_runner_dispatches_due_retry_plans ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+

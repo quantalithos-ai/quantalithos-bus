@@ -1,0 +1,29 @@
+{
+  "suite": "recovery",
+  "gate_suite": "bus-release-recovery",
+  "status": "passed",
+  "started_at": "2026-05-31T04:24:54Z",
+  "finished_at": "2026-05-31T04:24:55Z",
+  "duration_ms": 104,
+  "case_ids": [
+    "TC-BUS-REC-001",
+    "TC-BUS-REC-002",
+    "TC-BUS-REC-003",
+    "TC-BUS-REC-004"
+  ],
+  "evidence_ids": [
+    "EV-BUS-REC-001",
+    "EV-BUS-REC-002",
+    "EV-BUS-REC-003",
+    "EV-BUS-REC-004"
+  ],
+  "commands": [
+    "cargo test -p bus-domain recovery::tests",
+    "cargo test -p bus-application --test recovery",
+    "cargo test -p bus-jobs retry_cycle_job_runner"
+  ],
+  "stdout_path": "artifacts/test/20260531T042454Z-commit-08-a/suites/recovery/stdout.log",
+  "stderr_path": "artifacts/test/20260531T042454Z-commit-08-a/suites/recovery/stderr.log",
+  "report_path": "artifacts/test/20260531T042454Z-commit-08-a/suites/recovery/report.json",
+  "failed_command": null
+}

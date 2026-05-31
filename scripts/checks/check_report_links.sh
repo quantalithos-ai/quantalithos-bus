@@ -8,7 +8,8 @@ print_help() {
     cat <<'EOF'
 Usage: check_report_links.sh --artifact-root <path> [--report-root <path>]
 
-Validate that run reports avoid latest and forbidden project-layer links.
+Validate that run reports avoid latest and forbidden project-layer links, and
+that referenced report and artifact paths exist.
 
 Options:
   --artifact-root <path>       Artifact root for the fixed run id.
@@ -44,8 +45,13 @@ ensure_artifact_root_shape "${artifact_root}"
 ensure_report_root_shape "${report_root}"
 run_id=$(extract_run_id_from_artifact_root "${artifact_root}")
 run_report_dir="${report_root}/runs/${run_id}"
+acceptance_index="${report_root}/acceptance/${run_id}-index.md"
 
-if [[ -f "${run_report_dir}/artifact-index.md" ]] && ! grep -q "${artifact_root}" "${run_report_dir}/artifact-index.md"; then
+[[ -d "${run_report_dir}" ]] || die "run report directory does not exist: ${run_report_dir}"
+ensure_file "${run_report_dir}/artifact-index.md"
+ensure_file "${acceptance_index}"
+
+if ! grep -q "${artifact_root}" "${run_report_dir}/artifact-index.md"; then
     die "artifact-index.md does not point to ${artifact_root}"
 fi
 
@@ -57,6 +63,19 @@ for forbidden in 'artifacts/test/latest' 'reports/runs/latest' 'artifacts/test/q
     if scan_directory_for_pattern "${report_root}/acceptance" "${forbidden}" >/dev/null 2>&1; then
         die "forbidden acceptance link detected: ${forbidden}"
     fi
+done
+
+mapfile -t referenced_paths < <(
+    {
+        rg --no-filename -o 'artifacts/test/[A-Za-z0-9TZ._:/-]+' "${run_report_dir}" "${acceptance_index}" 2>/dev/null || true
+        rg --no-filename -o "reports/runs/${run_id}/[A-Za-z0-9TZ._:/-]+" "${run_report_dir}" "${acceptance_index}" 2>/dev/null || true
+        rg --no-filename -o "reports/acceptance/${run_id}-index.md" "${run_report_dir}" "${acceptance_index}" 2>/dev/null || true
+    } | sort -u
+)
+
+for referenced_path in "${referenced_paths[@]}"; do
+    cleaned_path=${referenced_path%%[).,]}
+    [[ -e "${cleaned_path}" ]] || die "referenced report path is missing: ${cleaned_path}"
 done
 
 printf 'Report link check passed for run %s\n' "${run_id}"

@@ -1,0 +1,30 @@
+$ cargo test -p bus-application --test feedback
+
+running 8 tests
+test record_feedback_rejects_unknown_delivery_without_orphan_feedback ... ok
+test record_timeout_signal_commits_failure_feedback_history_and_candidate ... ok
+test record_feedback_same_key_same_digest_returns_existing_result ... ok
+test record_backend_signal_same_key_same_digest_returns_existing_result ... ok
+test record_feedback_conflicts_after_timeout_signal_changes_delivery_state ... ok
+test record_ack_feedback_commits_truth_history_and_idempotency_anchor ... ok
+test record_backend_signal_commits_feedback_history_and_idempotency_anchor ... ok
+test record_feedback_same_key_different_digest_returns_conflict ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ cargo test -p bus-api record_feedback
+
+running 3 tests
+test tests::record_feedback_returns_completed_result_and_commits_truth ... ok
+test tests::record_feedback_late_or_unknown_feedback_returns_not_found_or_conflict ... ok
+test tests::record_feedback_same_key_same_digest_returns_existing_result ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+

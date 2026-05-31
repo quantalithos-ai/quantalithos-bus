@@ -8,7 +8,8 @@ print_help() {
     cat <<'EOF'
 Usage: check_config_summary.sh --run-id <run_id> [--report-root <path>]
 
-Validate that config-summary.md records the config profile and redaction policy.
+Validate that config-summary.md records the config profile, runtime graph, and
+release-gate control outcomes.
 
 Options:
   --run-id <run_id>            Fixed run identifier.
@@ -44,8 +45,11 @@ ensure_run_id "${run_id}"
 ensure_report_root_shape "${report_root}"
 summary_file="${report_root}/runs/${run_id}/config-summary.md"
 
-[[ -f "${summary_file}" ]] || die "config summary is missing: ${summary_file}"
+ensure_file "${summary_file}"
 grep -q 'Config Profile:' "${summary_file}" || die "config summary must record Config Profile"
+grep -q 'Runtime Graph:' "${summary_file}" || die "config summary must record Runtime Graph"
+grep -q 'Secret Policy:' "${summary_file}" || die "config summary must record Secret Policy"
 grep -q 'Redaction Policy:' "${summary_file}" || die "config summary must record Redaction Policy"
+grep -q 'Reload Request:' "${summary_file}" || die "config summary must record Reload Request"
 
 printf 'Config summary check passed for run %s\n' "${run_id}"

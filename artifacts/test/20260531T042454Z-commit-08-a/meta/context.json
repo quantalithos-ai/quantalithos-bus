@@ -1,0 +1,21 @@
+{
+  "run_id": "20260531T042454Z-commit-08-a",
+  "phase": "PH-08",
+  "commit_boundary": "commit-08-a",
+  "design_repo_commit": "8ff4797f0dd5c67b1b5ca4776acb40bd6412ab29",
+  "workspace_commit": "c0aa4182384acf9c2819d354a4d13543cbb83c24",
+  "config_profile": "operations-recovery",
+  "report_root": "reports",
+  "artifact_root": "artifacts/test/20260531T042454Z-commit-08-a",
+  "dependency_snapshot": [
+    "core-contracts = { path = \"../quantalithos-core/crates/contracts\" }"
+  ],
+  "design_scope": [
+    "ReleaseGate",
+    "ReportGeneration",
+    "EvidenceIndex",
+    "ConfigRuntimeValidation",
+    "AcceptanceIndex"
+  ],
+  "reviewer": "Codex"
+}

@@ -1,0 +1,86 @@
+{
+  "run_id": "20260531T042454Z-commit-08-a",
+  "phase": "PH-08",
+  "commit_boundary": "commit-08-a",
+  "artifact_root": "artifacts/test/20260531T042454Z-commit-08-a",
+  "report_root": "reports",
+  "families": [
+    {
+      "family": "EV-BUS-PUB",
+      "suite": "publication",
+      "case_ids": ["TC-BUS-PUB-001", "TC-BUS-PUB-002", "TC-BUS-PUB-003", "TC-BUS-PUB-004"],
+      "evidence_ids": ["EV-BUS-PUB-001", "EV-BUS-PUB-002", "EV-BUS-PUB-003", "EV-BUS-PUB-004"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-PUB.md"
+    },
+    {
+      "family": "EV-BUS-SEM",
+      "suite": "semantic",
+      "case_ids": ["TC-BUS-SEM-001", "TC-BUS-SEM-002"],
+      "evidence_ids": ["EV-BUS-SEM-001", "EV-BUS-SEM-002"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-SEM.md"
+    },
+    {
+      "family": "EV-BUS-DLV",
+      "suite": "delivery",
+      "case_ids": ["TC-BUS-DLV-001", "TC-BUS-DLV-002", "TC-BUS-DLV-003", "TC-BUS-DLV-004"],
+      "evidence_ids": ["EV-BUS-DLV-001", "EV-BUS-DLV-002", "EV-BUS-DLV-003", "EV-BUS-DLV-004"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-DLV.md"
+    },
+    {
+      "family": "EV-BUS-FDB",
+      "suite": "feedback",
+      "case_ids": ["TC-BUS-FDB-001", "TC-BUS-FDB-002", "TC-BUS-FDB-003", "TC-BUS-FDB-004"],
+      "evidence_ids": ["EV-BUS-FDB-001", "EV-BUS-FDB-002", "EV-BUS-FDB-003", "EV-BUS-FDB-004"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-FDB.md"
+    },
+    {
+      "family": "EV-BUS-REC",
+      "suite": "recovery",
+      "case_ids": ["TC-BUS-REC-001", "TC-BUS-REC-002", "TC-BUS-REC-003", "TC-BUS-REC-004"],
+      "evidence_ids": ["EV-BUS-REC-001", "EV-BUS-REC-002", "EV-BUS-REC-003", "EV-BUS-REC-004"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-REC.md"
+    },
+    {
+      "family": "EV-BUS-OUT",
+      "suite": "output",
+      "case_ids": ["TC-BUS-OUT-001", "TC-BUS-OUT-002", "TC-BUS-OUT-003", "TC-BUS-OUT-004", "TC-BUS-OUT-005", "TC-BUS-OUT-006"],
+      "evidence_ids": ["EV-BUS-OUT-001", "EV-BUS-OUT-002", "EV-BUS-OUT-003", "EV-BUS-OUT-004", "EV-BUS-OUT-005", "EV-BUS-OUT-006"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-OUT.md"
+    },
+    {
+      "family": "EV-BUS-OBX",
+      "suite": "outbox",
+      "case_ids": ["TC-BUS-OBX-001", "TC-BUS-OBX-002"],
+      "evidence_ids": ["EV-BUS-OBX-001", "EV-BUS-OBX-002"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-OBX.md"
+    },
+    {
+      "family": "EV-BUS-BND",
+      "suite": "backend",
+      "case_ids": ["TC-BUS-BND-001", "TC-BUS-BND-002", "TC-BUS-BND-003"],
+      "evidence_ids": ["EV-BUS-BND-001", "EV-BUS-BND-002", "EV-BUS-BND-003"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/evidence/EV-BUS-BND.md"
+    },
+    {
+      "family": "EV-BUS-CFG",
+      "suite": "config",
+      "case_ids": ["TC-BUS-CFG-001", "TC-BUS-CFG-002", "TC-BUS-CFG-003"],
+      "evidence_ids": ["EV-BUS-CFG-001", "EV-BUS-CFG-002", "EV-BUS-CFG-003"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/config-summary.md"
+    },
+    {
+      "family": "RP-BUS-RED",
+      "suite": "redaction",
+      "case_ids": ["TC-BUS-RED-001"],
+      "evidence_ids": ["RP-BUS-RED-001"],
+      "report": "reports/runs/20260531T042454Z-commit-08-a/redaction-check.md"
+    },
+    {
+      "family": "RP-BUS-SUM",
+      "suite": "report",
+      "case_ids": ["TC-BUS-RED-002"],
+      "evidence_ids": ["RP-BUS-SUM-001"],
+      "report": "reports/acceptance/20260531T042454Z-commit-08-a-index.md"
+    }
+  ]
+}

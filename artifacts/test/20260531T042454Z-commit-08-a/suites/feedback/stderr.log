@@ -1,0 +1,5 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running tests/feedback.rs (target/debug/deps/feedback-07df37d5d1a5f321)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src/lib.rs (target/debug/deps/bus_api-214bfa9e5e73692c)
+     Running unittests src/bin/bus_api.rs (target/debug/deps/bus_api-652000814a84967f)

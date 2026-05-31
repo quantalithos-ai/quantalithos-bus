@@ -1,0 +1,74 @@
+{
+  "run_id": "20260531T042454Z-commit-08-a",
+  "gates": [
+    {
+      "gate": "pr",
+      "status": "not_run",
+      "suites": [
+        "bus-unit",
+        "bus-service",
+        "bus-contract",
+        "bus-config",
+        "bus-redaction-smoke",
+        "bus-integration-fast"
+      ]
+    },
+    {
+      "gate": "main-ci",
+      "status": "not_run",
+      "suites": [
+        "bus-integration-full",
+        "bus-worker-consumer",
+        "bus-job-runner",
+        "bus-report-smoke"
+      ]
+    },
+    {
+      "gate": "release",
+      "status": "passed",
+      "suites": [
+        {
+          "name": "bus-release-closed-loop",
+          "status": "passed",
+          "artifact_suites": [
+            "publication",
+            "semantic",
+            "delivery",
+            "feedback",
+            "output",
+            "outbox",
+            "backend"
+          ]
+        },
+        {
+          "name": "bus-release-recovery",
+          "status": "passed",
+          "artifact_suites": [
+            "recovery"
+          ]
+        },
+        {
+          "name": "bus-release-config-runtime",
+          "status": "passed",
+          "artifact_suites": [
+            "config"
+          ]
+        },
+        {
+          "name": "bus-release-redaction",
+          "status": "passed",
+          "artifact_suites": [
+            "redaction"
+          ]
+        },
+        {
+          "name": "bus-release-report",
+          "status": "passed",
+          "artifact_suites": [
+            "report"
+          ]
+        }
+      ]
+    }
+  ]
+}
