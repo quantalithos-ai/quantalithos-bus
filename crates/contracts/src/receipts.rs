@@ -1,10 +1,12 @@
-//! Result DTOs returned by bus publication commands.
+//! Result DTOs returned by bus write-path operations.
 
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{
-    AuditRef, DeliveryId, DeliveryStatus, FeedbackId, FeedbackRecordStatus,
-    PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
+    AttemptCount, AuditRef, DeadLetterId, DeadLetterStatus, DeliveryId, DeliveryStatus,
+    FailureMaterialRef, FeedbackId, FeedbackRecordStatus, PublicationAcceptanceStatus,
+    PublicationId, RejectionReasonRef, ReplayPreparationId, ReplayPreparationStatus, RetryPlanId,
+    RetryPlanStatus, Timestamp,
 };
 
 /// The result returned after publication acceptance is decided.
@@ -285,6 +287,108 @@ impl TimeoutRecordResult {
             feedback_id: None,
             feedback_status: TimeoutRecordStatus::Ignored,
             recovery_candidate: false,
+            audit_ref,
+        }
+    }
+}
+
+/// The result returned after one retry plan is scheduled.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetryPlanResult {
+    /// The committed retry-plan identifier.
+    pub retry_plan_id: RetryPlanId,
+    /// The associated delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The committed retry-plan status.
+    pub retry_status: RetryPlanStatus,
+    /// The remaining attempt budget attached to the scheduled retry plan.
+    pub remaining_attempts: AttemptCount,
+    /// The next execution time calculated for the retry plan.
+    pub next_run_at: Timestamp,
+    /// The audit entry that records the retry request.
+    pub audit_ref: AuditRef,
+}
+
+impl RetryPlanResult {
+    /// Creates a result for a scheduled retry plan.
+    pub fn scheduled(
+        retry_plan_id: RetryPlanId,
+        delivery_id: DeliveryId,
+        remaining_attempts: AttemptCount,
+        next_run_at: Timestamp,
+        audit_ref: AuditRef,
+    ) -> Self {
+        Self {
+            retry_plan_id,
+            delivery_id,
+            retry_status: RetryPlanStatus::Scheduled,
+            remaining_attempts,
+            next_run_at,
+            audit_ref,
+        }
+    }
+}
+
+/// The result returned after one delivery enters the dead-letter path.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeadLetterResult {
+    /// The committed dead-letter identifier.
+    pub dead_letter_id: DeadLetterId,
+    /// The associated delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The committed dead-letter status.
+    pub dead_letter_status: DeadLetterStatus,
+    /// The linked failure-material reference.
+    pub failure_material_ref: FailureMaterialRef,
+    /// The audit entry that records dead-letter creation.
+    pub audit_ref: AuditRef,
+}
+
+impl DeadLetterResult {
+    /// Creates a result for a committed dead-letter entry.
+    pub fn opened(
+        dead_letter_id: DeadLetterId,
+        delivery_id: DeliveryId,
+        failure_material_ref: FailureMaterialRef,
+        audit_ref: AuditRef,
+    ) -> Self {
+        Self {
+            dead_letter_id,
+            delivery_id,
+            dead_letter_status: DeadLetterStatus::Open,
+            failure_material_ref,
+            audit_ref,
+        }
+    }
+}
+
+/// The result returned after one replay preparation becomes ready.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayPreparationResult {
+    /// The committed replay-preparation identifier.
+    pub replay_preparation_id: ReplayPreparationId,
+    /// The associated dead-letter identifier.
+    pub dead_letter_id: DeadLetterId,
+    /// The committed replay-preparation status.
+    pub replay_preparation_status: ReplayPreparationStatus,
+    /// The audit entry that records the ready transition.
+    pub audit_ref: AuditRef,
+}
+
+impl ReplayPreparationResult {
+    /// Creates a result for a ready replay preparation.
+    pub fn ready(
+        replay_preparation_id: ReplayPreparationId,
+        dead_letter_id: DeadLetterId,
+        audit_ref: AuditRef,
+    ) -> Self {
+        Self {
+            replay_preparation_id,
+            dead_letter_id,
+            replay_preparation_status: ReplayPreparationStatus::Ready,
             audit_ref,
         }
     }

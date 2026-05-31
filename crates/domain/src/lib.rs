@@ -7,3 +7,4 @@ pub mod errors;
 pub mod feedback;
 pub mod idempotency;
 pub mod publication;
+pub mod recovery;

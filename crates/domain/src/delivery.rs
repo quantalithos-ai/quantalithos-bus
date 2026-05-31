@@ -2,9 +2,9 @@
 
 use bus_contracts::metadata::{
     ActorContext, AttemptCount, AttemptNo, BackendCapabilityRef, BackendDeliveryResult,
-    BackendDeliveryStatus, DeliveryAttemptId, DeliveryAttemptRef, DeliveryHistoryId, DeliveryId,
-    DeliveryStatus, DeliveryTransitionRuleRef, FailureReason, HistoryReason, IdempotencyKey,
-    PublicationId, SubscriberRef, Timestamp, Version,
+    BackendDeliveryStatus, DeadLetterId, DeliveryAttemptId, DeliveryAttemptRef, DeliveryHistoryId,
+    DeliveryId, DeliveryStatus, DeliveryTransitionRuleRef, FailureReason, HistoryReason,
+    IdempotencyKey, PublicationId, SubscriberRef, Timestamp, Version,
 };
 
 use crate::errors::DomainError;
@@ -238,6 +238,29 @@ impl DeliveryRecord {
         }
 
         self.status = DeliveryStatus::Failed;
+        Ok(())
+    }
+
+    /// Marks the failed delivery as dead-lettered by one recovery flow.
+    pub fn mark_dead_lettered(
+        &mut self,
+        dead_letter_id: DeadLetterId,
+        _actor: ActorContext,
+    ) -> Result<(), DomainError> {
+        if dead_letter_id.as_str().trim().is_empty() {
+            return Err(DomainError::InvalidDeliveryRecord("dead_letter_id"));
+        }
+        if self.status != DeliveryStatus::Failed {
+            return Err(DomainError::DeadLetterNotAllowed);
+        }
+        if !self.can_transition_to(DeliveryStatus::DeadLettered) {
+            return Err(DomainError::InvalidDeliveryTransition {
+                from: self.status,
+                to: DeliveryStatus::DeadLettered,
+            });
+        }
+
+        self.status = DeliveryStatus::DeadLettered;
         Ok(())
     }
 
@@ -556,6 +579,37 @@ mod tests {
             .expect("dispatching delivery may fail");
 
         assert_eq!(record.status, DeliveryStatus::Failed);
+    }
+
+    #[test]
+    fn delivery_record_marks_dead_lettered_from_failed() {
+        let (mut record, actor, capability_ref) = scheduled_record();
+
+        record
+            .start_attempt(capability_ref, Timestamp::new("2026-05-30T00:00:01Z"))
+            .expect("scheduled delivery should start");
+        record
+            .mark_failed(FailureReason::dispatch_failed(), actor.clone())
+            .expect("dispatching delivery may fail");
+        record
+            .mark_dead_lettered(DeadLetterId::new("dead_letter_001"), actor)
+            .expect("failed delivery may enter dead-lettered state");
+
+        assert_eq!(record.status, DeliveryStatus::DeadLettered);
+    }
+
+    #[test]
+    fn delivery_record_rejects_dead_letter_before_failure() {
+        let (mut record, actor, capability_ref) = scheduled_record();
+
+        record
+            .start_attempt(capability_ref, Timestamp::new("2026-05-30T00:00:01Z"))
+            .expect("scheduled delivery should start");
+        let error = record
+            .mark_dead_lettered(DeadLetterId::new("dead_letter_002"), actor)
+            .expect_err("non-failed delivery must not enter dead letter");
+
+        assert_eq!(error, DomainError::DeadLetterNotAllowed);
     }
 
     #[test]

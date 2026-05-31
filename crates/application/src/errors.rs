@@ -350,6 +350,26 @@ impl From<DomainError> for ApplicationError {
                 "validation.feedback_result",
                 format!("invalid feedback result field: {field}"),
             ),
+            DomainError::InvalidRetryPlan(field) => Self::validation(
+                "validation.retry_plan",
+                format!("invalid retry plan field: {field}"),
+            ),
+            DomainError::InvalidDeadLetterEntry(field) => Self::validation(
+                "validation.dead_letter_entry",
+                format!("invalid dead-letter field: {field}"),
+            ),
+            DomainError::InvalidReplayPreparation(field) => Self::validation(
+                "validation.replay_preparation",
+                format!("invalid replay preparation field: {field}"),
+            ),
+            DomainError::InvalidFailureMaterial(field) => Self::validation(
+                "validation.failure_material",
+                format!("invalid failure material field: {field}"),
+            ),
+            DomainError::InvalidRecoveryPolicy(field) => Self::validation(
+                "validation.recovery_policy",
+                format!("invalid recovery policy field: {field}"),
+            ),
             DomainError::InvalidRequestDigest => Self::internal(
                 "internal.request_digest",
                 "request digest could not be computed",
@@ -376,6 +396,20 @@ impl From<DomainError> for ApplicationError {
             | DomainError::AttemptFinishedBeforeStart => {
                 Self::conflict("conflict.delivery_state", error.to_string(), None)
             }
+            DomainError::InvalidRetryPlanTransition { .. }
+            | DomainError::RetryNotAllowed
+            | DomainError::RetryExhaustedCannotDispatch => {
+                Self::conflict("conflict.retry_plan_state", error.to_string(), None)
+            }
+            DomainError::InvalidDeadLetterTransition { .. }
+            | DomainError::DeadLetterNotAllowed
+            | DomainError::DeadLetterClosed => {
+                Self::conflict("conflict.dead_letter_state", error.to_string(), None)
+            }
+            DomainError::InvalidReplayPreparationTransition { .. }
+            | DomainError::ReplayPreparationNotAllowed => {
+                Self::conflict("conflict.replay_preparation_state", error.to_string(), None)
+            }
             DomainError::TargetScopeMismatch | DomainError::NonDurableTransportSemantic => {
                 Self::validation("validation.transport_semantic", error.to_string())
             }
@@ -386,6 +420,12 @@ impl From<DomainError> for ApplicationError {
             ),
             DomainError::BackendPrivateFieldLeak => Self::boundary_violation(
                 "boundary.backend_private_field_rejected",
+                error.to_string(),
+                None,
+            ),
+            DomainError::DeadLetterCannotDispatchDirectly
+            | DomainError::ReplayPreparationIsNotExecutor => Self::boundary_violation(
+                "boundary.recovery_executor_rejected",
                 error.to_string(),
                 None,
             ),

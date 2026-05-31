@@ -1,11 +1,13 @@
-//! Command DTOs for the bus publication flow.
+//! Command DTOs for bus write-path operations.
 
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{
-    CoreEventRef, DeliveryAttemptId, DeliveryId, DeliveryMode, ExternalFeedbackRef, FeedbackKind,
-    FeedbackReason, PayloadDigest, PayloadKind, PayloadRef, SourceRecordRef, SourceSystem,
-    TargetScope, Timestamp,
+    AttemptLimit, AuditChainRef, CoreEventRef, DeadLetterId, DeadLetterReason, DeliveryAttemptId,
+    DeliveryId, DeliveryMode, ExternalFeedbackRef, FailureMaterialRef, FeedbackKind,
+    FeedbackReason, OperatorNoteRef, PayloadDigest, PayloadKind, PayloadRef, ReplayApprovalRef,
+    ReplayReason, RetryPolicyRef, RetryRequestReason, SourceRecordRef, SourceSystem, TargetScope,
+    Timestamp,
 };
 
 /// Accepts publication material references into the bus.
@@ -46,4 +48,48 @@ pub struct RecordDeliveryFeedbackCommand {
     pub observed_at: Timestamp,
     /// The stable upstream feedback reference.
     pub external_feedback_ref: ExternalFeedbackRef,
+}
+
+/// Requests one controlled retry plan for a failed delivery.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRetryCommand {
+    /// The target failed delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The existing failure material reference that justifies retry.
+    pub failure_material_ref: FailureMaterialRef,
+    /// The retry-policy reference supplied by the caller.
+    pub retry_policy_ref: RetryPolicyRef,
+    /// The stable retry-request reason.
+    pub requested_reason: RetryRequestReason,
+    /// The maximum number of attempts allowed by this retry request.
+    pub max_attempts: AttemptLimit,
+}
+
+/// Moves one failed delivery into the dead-letter path.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveDeliveryToDeadLetterCommand {
+    /// The target failed delivery identifier.
+    pub delivery_id: DeliveryId,
+    /// The existing failure material reference to link into the dead-letter entry.
+    pub failure_material_ref: FailureMaterialRef,
+    /// The stable dead-letter reason supplied by the caller.
+    pub dead_letter_reason: DeadLetterReason,
+    /// The optional operator note reference.
+    pub operator_note_ref: Option<OperatorNoteRef>,
+}
+
+/// Prepares replay material from an approved dead-letter entry.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareReplayCommand {
+    /// The target dead-letter identifier.
+    pub dead_letter_id: DeadLetterId,
+    /// The trusted audit-chain reference that backs the replay preparation.
+    pub audit_chain_ref: AuditChainRef,
+    /// The external replay-approval reference.
+    pub approval_ref: ReplayApprovalRef,
+    /// The stable replay reason supplied by the caller.
+    pub replay_reason: ReplayReason,
 }

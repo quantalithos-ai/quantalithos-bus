@@ -80,6 +80,7 @@ macro_rules! numeric_newtype {
 }
 
 string_newtype!(AuditRef, "A reference to a committed bus audit entry.");
+string_newtype!(AuditChainRef, "A reference to a committed bus audit chain.");
 string_newtype!(
     BackendCapabilityId,
     "A stable backend capability identifier."
@@ -109,11 +110,21 @@ string_newtype!(
     ConsumerMarker,
     "A stable consumer marker for source acknowledgements."
 );
+string_newtype!(
+    CloseReason,
+    "A stable reason for closing a dead-letter entry."
+);
 string_newtype!(CoreEventRef, "A reference to an L0-core event contract.");
 string_newtype!(
     CoreEventEnvelopeRef,
     "A reference to a committed L0-core event envelope."
 );
+string_newtype!(DeadLetterId, "A stable dead-letter entry identifier.");
+string_newtype!(
+    DeadLetterReason,
+    "A stable reason for moving delivery to dead letter."
+);
+string_newtype!(DeadLetterRef, "A stable reference to a dead-letter entry.");
 string_newtype!(DeliveryAttemptId, "A stable delivery attempt identifier.");
 string_newtype!(
     DeliveryAttemptRef,
@@ -122,6 +133,10 @@ string_newtype!(
 string_newtype!(
     DeliveryHistoryId,
     "A stable delivery history entry identifier."
+);
+string_newtype!(
+    DeliveryHistoryRef,
+    "A stable reference to a delivery history entry."
 );
 string_newtype!(DeliveryId, "A stable delivery identifier.");
 string_newtype!(
@@ -134,6 +149,11 @@ string_newtype!(
 );
 string_newtype!(EventId, "A stable inbound event identifier.");
 string_newtype!(EventSourceRef, "A stable inbound event source reference.");
+string_newtype!(FailureMaterialId, "A stable failure material identifier.");
+string_newtype!(
+    FailureMaterialRef,
+    "A stable reference to failure material."
+);
 string_newtype!(
     ExternalFeedbackRef,
     "A stable external feedback source reference."
@@ -146,6 +166,7 @@ string_newtype!(
     "A reference to the payload body boundary policy."
 );
 string_newtype!(HistoryReason, "A stable delivery history reason.");
+string_newtype!(OperatorNoteRef, "A stable operator note reference.");
 string_newtype!(
     OutboxFactRef,
     "A reference to a committed upstream outbox fact."
@@ -162,6 +183,29 @@ string_newtype!(
     RejectionReasonRef,
     "A stable reference to a publication rejection reason code."
 );
+string_newtype!(
+    RecoveryPolicyConfigRef,
+    "A stable recovery-policy config reference."
+);
+string_newtype!(RecoveryPolicyRef, "A stable recovery-policy reference.");
+string_newtype!(
+    RecoveryReason,
+    "A stable reason for cancelling a recovery plan."
+);
+string_newtype!(ReplayApprovalRef, "A stable replay-approval reference.");
+string_newtype!(
+    ReplayPreparationId,
+    "A stable replay-preparation identifier."
+);
+string_newtype!(
+    ReplayPreparationRef,
+    "A stable reference to a replay preparation."
+);
+string_newtype!(ReplayReason, "A stable replay request reason.");
+string_newtype!(ReplayRejectReason, "A stable replay rejection reason.");
+string_newtype!(RetryPlanId, "A stable retry-plan identifier.");
+string_newtype!(RetryPolicyRef, "A stable retry-policy reference.");
+string_newtype!(RetryRequestReason, "A stable retry request reason.");
 string_newtype!(SourceRecordRef, "A stable source record reference.");
 string_newtype!(SourceSystem, "A stable source system identifier.");
 string_newtype!(SubscriberRef, "A stable subscriber identifier.");
@@ -174,6 +218,11 @@ numeric_newtype!(
     AttemptCount,
     u32,
     "The number of attempts recorded for a delivery."
+);
+numeric_newtype!(
+    AttemptLimit,
+    u32,
+    "The maximum number of attempts allowed by one retry request."
 );
 numeric_newtype!(AttemptNo, u32, "A one-based delivery attempt number.");
 numeric_newtype!(
@@ -197,6 +246,19 @@ impl AttemptCount {
     /// Returns the incremented count.
     pub fn increment(self) -> Self {
         Self::new(self.get() + 1)
+    }
+}
+
+impl AttemptLimit {
+    /// Returns whether the configured attempt limit is zero.
+    pub fn is_zero(self) -> bool {
+        self.get() == 0
+    }
+}
+
+impl From<AttemptLimit> for AttemptCount {
+    fn from(value: AttemptLimit) -> Self {
+        Self::new(value.get())
     }
 }
 
@@ -275,6 +337,49 @@ impl From<CommittedOutboxFactRef> for OutboxFactRef {
     }
 }
 
+impl From<DeliveryHistoryId> for DeliveryHistoryRef {
+    fn from(value: DeliveryHistoryId) -> Self {
+        Self::new(value.as_str())
+    }
+}
+
+impl From<FailureMaterialId> for FailureMaterialRef {
+    fn from(value: FailureMaterialId) -> Self {
+        Self::new(value.as_str())
+    }
+}
+
+impl From<FailureMaterialRef> for FailureMaterialId {
+    fn from(value: FailureMaterialRef) -> Self {
+        Self::new(value.as_str())
+    }
+}
+
+impl From<DeadLetterId> for DeadLetterRef {
+    fn from(value: DeadLetterId) -> Self {
+        Self::new(value.as_str())
+    }
+}
+
+impl From<DeadLetterRef> for DeadLetterId {
+    fn from(value: DeadLetterRef) -> Self {
+        Self::new(value.as_str())
+    }
+}
+
+impl From<ReplayPreparationId> for ReplayPreparationRef {
+    fn from(value: ReplayPreparationId) -> Self {
+        Self::new(value.as_str())
+    }
+}
+
+impl AuditChainRef {
+    /// Builds a stable audit-chain reference from one audit entry reference.
+    pub fn from_audit_ref(audit_ref: &AuditRef) -> Self {
+        Self::new(format!("audit_chain_{}", sanitize(audit_ref.as_str())))
+    }
+}
+
 /// The supported payload reference kinds for publication acceptance.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -319,6 +424,44 @@ pub enum DeliveryStatus {
     DeadLettered,
     /// The delivery was completed by an acknowledged feedback result.
     Completed,
+}
+
+/// The recovery status for one retry plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryPlanStatus {
+    /// The retry plan is scheduled and may still be executed.
+    Scheduled,
+    /// The retry plan consumed all allowed attempts.
+    Exhausted,
+    /// The retry plan was cancelled before exhaustion.
+    Cancelled,
+}
+
+/// The recovery status for one dead-letter entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeadLetterStatus {
+    /// The dead-letter entry is open and awaiting operator handling.
+    Open,
+    /// The dead-letter entry is under active review.
+    Reviewing,
+    /// The dead-letter entry has been closed.
+    Closed,
+}
+
+/// The recovery status for one replay preparation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayPreparationStatus {
+    /// The replay preparation is still a draft.
+    Draft,
+    /// The replay preparation is ready for the later replay executor boundary.
+    Ready,
+    /// The replay preparation was rejected.
+    Rejected,
+    /// The replay preparation was replaced by a newer preparation.
+    Superseded,
 }
 
 /// The feedback kind accepted by the command API.

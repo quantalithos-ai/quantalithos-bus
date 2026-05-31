@@ -1,6 +1,9 @@
 //! Reusable fixture builders for contract and domain tests.
 
-use crate::commands::{AcceptPublicationCommand, RecordDeliveryFeedbackCommand};
+use crate::commands::{
+    AcceptPublicationCommand, MoveDeliveryToDeadLetterCommand, PrepareReplayCommand,
+    RecordDeliveryFeedbackCommand, RequestRetryCommand,
+};
 use crate::events::{
     BackendDeliverySignalInput, CommittedOutboxFact, CommittedOutboxFactInput,
     CommittedOutboxFactPage, DeliveryTimeoutSignalInput,
@@ -9,19 +12,24 @@ use crate::jobs::{
     DeliveryProgressionResult, OutboxRelayJobResult, RunDeliveryProgressionJob, RunOutboxRelayJob,
 };
 use crate::metadata::{
-    ActorContext, ActorKind, ActorRef, BackendCapabilityRef, BackendId, BackendKind,
-    BackendProfileRef, BackendResultRef, BackendStatus, CapabilityVersion, CommandMetadata,
-    CommittedOutboxFactRef, ConsistencyMarker, ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef,
-    DeliveryAttemptId, DeliveryId, DeliveryMode, DeliveryScanCursor, DeliveryStatus, EventId,
-    EventMetadata, EventSourceRef, ExternalFeedbackRef, FeedbackId, FeedbackKind, FeedbackReason,
-    FeedbackRecordStatus, JobMetadata, JobRunId, JobTriggerSource, OutboxCursor, PayloadDigest,
-    PayloadKind, PayloadRef, PublicationId, RequestId, RequestMetadata, RequestOrigin,
-    SourceRecordRef, SourceSystem, TargetScope, TimeoutReason, Timestamp, TraceId,
+    ActorContext, ActorKind, ActorRef, AttemptCount, AttemptLimit, AuditChainRef,
+    BackendCapabilityRef, BackendId, BackendKind, BackendProfileRef, BackendResultRef,
+    BackendStatus, CapabilityVersion, CommandMetadata, CommittedOutboxFactRef, ConsistencyMarker,
+    ConsumerMarker, CoreEventEnvelopeRef, CoreEventRef, DeadLetterId, DeadLetterReason,
+    DeadLetterStatus, DeliveryAttemptId, DeliveryId, DeliveryMode, DeliveryScanCursor,
+    DeliveryStatus, EventId, EventMetadata, EventSourceRef, ExternalFeedbackRef,
+    FailureMaterialRef, FeedbackId, FeedbackKind, FeedbackReason, FeedbackRecordStatus,
+    JobMetadata, JobRunId, JobTriggerSource, OperatorNoteRef, OutboxCursor, PayloadDigest,
+    PayloadKind, PayloadRef, PublicationId, ReplayApprovalRef, ReplayPreparationId,
+    ReplayPreparationStatus, ReplayReason, RequestId, RequestMetadata, RequestOrigin, RetryPlanId,
+    RetryPlanStatus, RetryPolicyRef, RetryRequestReason, SourceRecordRef, SourceSystem,
+    TargetScope, TimeoutReason, Timestamp, TraceId,
 };
 use crate::queries::GetDeliveryStatusQuery;
 use crate::receipts::{
-    BackendSignalNormalizedResult, BackendSignalResult, BackendSignalStatus, FeedbackRecordResult,
-    OutboxRelayResult, OutboxRelayStatus, TimeoutRecordResult, TimeoutRecordStatus,
+    BackendSignalNormalizedResult, BackendSignalResult, BackendSignalStatus, DeadLetterResult,
+    FeedbackRecordResult, OutboxRelayResult, OutboxRelayStatus, ReplayPreparationResult,
+    RetryPlanResult, TimeoutRecordResult, TimeoutRecordStatus,
 };
 use crate::views::DeliveryStatusView;
 
@@ -517,6 +525,120 @@ impl FeedbackFixtureBuilder {
     }
 }
 
+/// Builds deterministic recovery command and receipt fixtures for a run.
+#[derive(Clone, Debug)]
+pub struct RecoveryFixtureBuilder {
+    run: TestRun,
+}
+
+impl RecoveryFixtureBuilder {
+    /// Creates a new recovery fixture builder.
+    pub fn new(run: TestRun) -> Self {
+        Self { run }
+    }
+
+    /// Returns a stable failure-material reference for the current run.
+    pub fn failure_material_ref(&self) -> FailureMaterialRef {
+        FailureMaterialRef::new(format!("failure_material_{}", self.run.run_id))
+    }
+
+    /// Returns a stable retry-policy reference for the current run.
+    pub fn retry_policy_ref(&self) -> RetryPolicyRef {
+        RetryPolicyRef::new(format!("retry_policy_{}", self.run.run_id))
+    }
+
+    /// Returns a stable dead-letter identifier for the current run.
+    pub fn dead_letter_id(&self) -> DeadLetterId {
+        DeadLetterId::new(format!("dead_letter_{}", self.run.run_id))
+    }
+
+    /// Returns a stable audit-chain reference for the current run.
+    pub fn audit_chain_ref(&self) -> AuditChainRef {
+        AuditChainRef::new(format!("audit_chain_{}", self.run.run_id))
+    }
+
+    /// Returns a stable replay-approval reference for the current run.
+    pub fn replay_approval_ref(&self) -> ReplayApprovalRef {
+        ReplayApprovalRef::new(format!("approval_{}", self.run.run_id))
+    }
+
+    /// Returns a retry command for the provided delivery identifier.
+    pub fn request_retry_command(&self, delivery_id: DeliveryId) -> RequestRetryCommand {
+        RequestRetryCommand {
+            delivery_id,
+            failure_material_ref: self.failure_material_ref(),
+            retry_policy_ref: self.retry_policy_ref(),
+            requested_reason: RetryRequestReason::new("transient_backend_failure"),
+            max_attempts: AttemptLimit::new(3),
+        }
+    }
+
+    /// Returns a dead-letter command for the provided delivery identifier.
+    pub fn move_to_dead_letter_command(
+        &self,
+        delivery_id: DeliveryId,
+    ) -> MoveDeliveryToDeadLetterCommand {
+        MoveDeliveryToDeadLetterCommand {
+            delivery_id,
+            failure_material_ref: self.failure_material_ref(),
+            dead_letter_reason: DeadLetterReason::new("retry_exhausted"),
+            operator_note_ref: Some(OperatorNoteRef::new(format!(
+                "operator_note_{}",
+                self.run.run_id
+            ))),
+        }
+    }
+
+    /// Returns a replay-preparation command for the provided dead-letter identifier.
+    pub fn prepare_replay_command(&self, dead_letter_id: DeadLetterId) -> PrepareReplayCommand {
+        PrepareReplayCommand {
+            dead_letter_id,
+            audit_chain_ref: self.audit_chain_ref(),
+            approval_ref: self.replay_approval_ref(),
+            replay_reason: ReplayReason::new("operator_approved_replay"),
+        }
+    }
+
+    /// Returns a retry-plan result DTO fixture.
+    pub fn retry_plan_result(&self, delivery_id: DeliveryId) -> RetryPlanResult {
+        RetryPlanResult {
+            retry_plan_id: RetryPlanId::new(format!("retry_plan_{}", self.run.run_id)),
+            delivery_id,
+            retry_status: RetryPlanStatus::Scheduled,
+            remaining_attempts: AttemptCount::new(3),
+            next_run_at: Timestamp::new("2026-05-31T00:05:00Z"),
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a dead-letter result DTO fixture.
+    pub fn dead_letter_result(&self, delivery_id: DeliveryId) -> DeadLetterResult {
+        DeadLetterResult {
+            dead_letter_id: self.dead_letter_id(),
+            delivery_id,
+            dead_letter_status: DeadLetterStatus::Open,
+            failure_material_ref: self.failure_material_ref(),
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+
+    /// Returns a replay-preparation result DTO fixture.
+    pub fn replay_preparation_result(
+        &self,
+        dead_letter_id: DeadLetterId,
+    ) -> ReplayPreparationResult {
+        ReplayPreparationResult {
+            replay_preparation_id: ReplayPreparationId::new(format!(
+                "replay_preparation_{}",
+                self.run.run_id
+            )),
+            dead_letter_id,
+            replay_preparation_status: ReplayPreparationStatus::Ready,
+            audit_ref: crate::metadata::AuditRef::new(format!("audit_{}", self.run.run_id)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
@@ -527,7 +649,8 @@ mod tests {
         AuditRef, DeliveryStatus, PublicationAcceptanceStatus, PublicationId, RejectionReasonRef,
     };
     use crate::receipts::{
-        BackendSignalResult, FeedbackRecordResult, PublicationAcceptanceResult, TimeoutRecordResult,
+        BackendSignalResult, DeadLetterResult, FeedbackRecordResult, PublicationAcceptanceResult,
+        ReplayPreparationResult, RetryPlanResult, TimeoutRecordResult,
     };
 
     fn roundtrip<T>(value: &T)
@@ -604,6 +727,65 @@ mod tests {
             delivery_status: DeliveryStatus::Completed,
             audit_ref: AuditRef::new("audit-002"),
         });
+    }
+
+    #[test]
+    fn request_retry_command_roundtrip() {
+        let run = TestRunBuilder::new("rec-001").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = RecoveryFixtureBuilder::new(run);
+        let command = builder.request_retry_command(delivery_builder.delivery_id());
+
+        roundtrip(&command);
+    }
+
+    #[test]
+    fn move_delivery_to_dead_letter_command_roundtrip() {
+        let run = TestRunBuilder::new("rec-002").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = RecoveryFixtureBuilder::new(run);
+        let command = builder.move_to_dead_letter_command(delivery_builder.delivery_id());
+
+        roundtrip(&command);
+    }
+
+    #[test]
+    fn prepare_replay_command_roundtrip() {
+        let run = TestRunBuilder::new("rec-003").build();
+        let builder = RecoveryFixtureBuilder::new(run);
+        let command = builder.prepare_replay_command(builder.dead_letter_id());
+
+        roundtrip(&command);
+    }
+
+    #[test]
+    fn retry_plan_result_roundtrip() {
+        let run = TestRunBuilder::new("rec-004").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = RecoveryFixtureBuilder::new(run);
+        let result: RetryPlanResult = builder.retry_plan_result(delivery_builder.delivery_id());
+
+        roundtrip(&result);
+    }
+
+    #[test]
+    fn dead_letter_result_roundtrip() {
+        let run = TestRunBuilder::new("rec-005").build();
+        let delivery_builder = DeliveryFixtureBuilder::new(run.clone());
+        let builder = RecoveryFixtureBuilder::new(run);
+        let result: DeadLetterResult = builder.dead_letter_result(delivery_builder.delivery_id());
+
+        roundtrip(&result);
+    }
+
+    #[test]
+    fn replay_preparation_result_roundtrip() {
+        let run = TestRunBuilder::new("rec-006").build();
+        let builder = RecoveryFixtureBuilder::new(run);
+        let result: ReplayPreparationResult =
+            builder.replay_preparation_result(builder.dead_letter_id());
+
+        roundtrip(&result);
     }
 
     #[test]
