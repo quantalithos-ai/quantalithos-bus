@@ -351,9 +351,18 @@ jq -n \
 
 status_label() {
     case "$1" in
-        not_hit) printf 'Not Hit\n' ;;
-        hit) printf 'Hit\n' ;;
-        evidence_insufficient) printf 'Evidence Insufficient\n' ;;
+        not_hit) printf 'Pass\n' ;;
+        hit) printf 'Fail\n' ;;
+        evidence_insufficient) printf 'Blocked\n' ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+overall_status_label() {
+    case "$1" in
+        passed) printf 'Pass\n' ;;
+        failed) printf 'Fail\n' ;;
+        blocked) printf 'Blocked\n' ;;
         *) printf '%s\n' "$1" ;;
     esac
 }
@@ -362,7 +371,7 @@ status_label() {
     printf '# Veto Checklist\n\n'
     printf -- '- Run ID: %s\n' "${run_id}"
     printf -- '- Reviewer: Codex\n'
-    printf -- '- Overall Status: %s\n' "${overall_status}"
+    printf -- '- Overall Status: %s\n' "$(overall_status_label "${overall_status}")"
     printf -- '- Machine Review: reports/acceptance/%s-veto.json\n' "${run_id}"
     printf '\n## Veto Review\n\n'
     printf '| Veto ID | Status | Reason | Evidence |\n'
